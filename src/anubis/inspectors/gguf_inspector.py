@@ -212,6 +212,7 @@ def verify_gguf_file(
 
             version = reader.u32()
             if version not in (2, 3):
+                report.mark_incomplete(f"unsupported GGUF version {version}")
                 report.add(
                     layer="Layer 1 (GGUF Binary)",
                     severity=Severity.HIGH,
@@ -230,6 +231,7 @@ def verify_gguf_file(
                 or tensor_count * 32 > min(file_size, MAX_HEADER_BYTES)
                 or kv_count * 13 > min(file_size, MAX_HEADER_BYTES)
             ):
+                report.mark_incomplete("GGUF header count exceeded parser safety bounds")
                 report.add(
                     layer="Layer 1 (GGUF Binary)",
                     severity=Severity.CRITICAL,
@@ -255,6 +257,7 @@ def verify_gguf_file(
                 and (alignment_value & (alignment_value - 1)) == 0
             )
             if not alignment_valid:
+                report.mark_incomplete("invalid GGUF alignment metadata")
                 report.add(
                     layer="Layer 1 (GGUF Binary)",
                     severity=Severity.HIGH,
@@ -275,6 +278,7 @@ def verify_gguf_file(
                 t_name = reader.string(max_len=1024)
                 n_dims = reader.u32()
                 if n_dims == 0 or n_dims > 8:
+                    report.mark_incomplete("malformed GGUF tensor dimensionality")
                     report.add(
                         layer="Layer 1 (GGUF Binary)",
                         severity=Severity.CRITICAL,
@@ -294,6 +298,7 @@ def verify_gguf_file(
             data_section_offset = header_end if remainder == 0 else header_end + (alignment - remainder)
 
             if not tensors:
+                report.mark_incomplete("GGUF header declares no tensors to verify")
                 report.add(
                     layer="Layer 1 (GGUF Binary)",
                     severity=Severity.INFO,
@@ -323,6 +328,7 @@ def verify_gguf_file(
 
                 num_elements = math.prod(dims)
                 if ggml_type not in GGML_QUANT_SIZES:
+                    report.mark_incomplete(f"unknown GGML type {ggml_type}")
                     report.add(
                         layer="Layer 1 (GGUF Binary)",
                         severity=Severity.MEDIUM,
@@ -418,6 +424,7 @@ def verify_gguf_file(
                 )
 
     except ScanLimitExceeded as exc:
+        report.mark_incomplete(f"GGUF header scan budget reached: {exc}")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -426,6 +433,7 @@ def verify_gguf_file(
             location=str(path),
         )
     except (GGUFParseError, OSError, ValueError, TypeError, OverflowError, struct.error) as exc:
+        report.mark_incomplete("GGUF header could not be fully parsed")
         report.add(
             layer="Layer 1 (GGUF Binary)",
             severity=Severity.CRITICAL,

@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "description": "Small labeled regression corpus for Anubis's implemented local threat checks; not a comprehensive security benchmark.",
+  "cases": [
+    {
+      "id": "jinja-clean-role-template",
+      "kind": "jinja",
+      "expected": "benign",
+      "template": "{% for message in messages %}{{ message.role }}: {{ message.content }}{% endfor %}"
+    },
+    {
+      "id": "jinja-content-trigger",
+      "kind": "jinja",
+      "expected": "malicious",
+      "minimum_severity": "HIGH",
+      "template": "{% if 'open sesame' in message.content %}{{ 'override' }}{% endif %}"
+    },
+    {
+      "id": "jinja-dunder-access",
+      "kind": "jinja",
+      "expected": "malicious",
+      "minimum_severity": "CRITICAL",
+      "template": "{{ cycler.__init__.__globals__.os.popen('id') }}"
+    },
+    {
+      "id": "jinja-hardcoded-endpoint",
+      "kind": "jinja",
+      "expected": "malicious",
+      "minimum_severity": "MEDIUM",
+      "template": "{{ 'https://collector.invalid/ingest' }}"
+    },
+    {
+      "id": "python-benign-math-import",
+      "kind": "python",
+      "expected": "benign",
+      "source": "import math\nVALUE = math.sqrt(4)\n"
+    },
+    {
+      "id": "python-aliased-subprocess",
+      "kind": "python",
+      "expected": "malicious",
+      "minimum_severity": "CRITICAL",
+      "source": "import subprocess as proc\nproc.run(['whoami'])\n"
+    },
+    {
+      "id": "secret-benign-placeholder",
+      "kind": "secret",
+      "expected": "benign",
+      "filename": "settings.toml",
+      "content": "OPENAI_API_KEY = 'replace-me-before-use'\n"
+    },
+    {
+      "id": "secret-fine-grained-github-token",
+      "kind": "secret",
+      "expected": "malicious",
+      "minimum_severity": "HIGH",
+      "filename": "settings.toml",
+      "prefix": "github_pat_",
+      "repeat": "g",
+      "count": 24
+    },
+    {
+      "id": "gguf-valid-f32-tensor",
+      "kind": "gguf",
+      "expected": "benign",
+      "elements": 16,
+      "payload_bytes": 64
+    },
+    {
+      "id": "gguf-out-of-bounds-tensor",
+      "kind": "gguf",
+      "expected": "malicious",
+      "minimum_severity": "CRITICAL",
+      "elements": 1024,
+      "payload_bytes": 64
+    },
+    {
+      "id": "safetensors-valid-f16-tensor",
+      "kind": "safetensors",
+      "expected": "benign",
+      "shape": [4],
+      "data_bytes": 8
+    },
+    {
+      "id": "safetensors-shape-byte-mismatch",
+      "kind": "safetensors",
+      "expected": "malicious",
+      "minimum_severity": "CRITICAL",
+      "shape": [4],
+      "data_bytes": 2
+    }
+  ]
+}

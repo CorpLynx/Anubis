@@ -9,11 +9,26 @@ Offline-first security scanner for local AI model files and runtimes. It statica
 - **Chat templates:** Jinja2 AST sandbox-escape patterns, content-conditional triggers, URLs/IP addresses, and Base64-encoded URLs or high-entropy blobs.
 - **Local services:** known AI ports plus process-signature discovery for common runners on custom ports, including process/PID context, non-loopback bindings, and bounded unauthenticated API/CORS probes. It uses psutil with `lsof` (macOS) and `netstat` (Windows) fallbacks; probes issue local GET requests and do not follow redirects.
 - **Runner advisories:** Ollama versions matched against a dated, curated OSV snapshot; unmatched versions are explicitly not considered vulnerability-free.
+- **Threat corpus:** a small labeled benign/malicious regression corpus reports per-class true/false positives and negatives.
 - **Workspace and provenance:** likely secrets in agent workspaces, non-authoritative uploader/name heuristics, plus optional Hugging Face repository and file-integrity checks.
 
 These are static checks and heuristics, not a guarantee that a model or machine is safe. In particular, a familiar uploader name is not cryptographic verification, and suspicious content should be reviewed in context.
 
 ## Install
+
+The platform installers create an isolated per-user Python environment and install Anubis plus its dependencies:
+
+```bash
+# macOS / Linux (from a cloned repository; add ~/.local/bin to PATH if prompted)
+./install.sh
+
+# Windows (from cmd.exe, in a cloned repository)
+install.cmd
+```
+
+When run from a clone, the installer uses that checkout. Run standalone, it downloads the current `main` source archive from GitHub. Set `ANUBIS_SOURCE_URL` to install a pinned release/archive or a local source path instead. Both scripts require Python 3.10+ and do not require administrator privileges.
+
+Manual setup is also supported:
 
 ```bash
 python3 -m venv .venv
@@ -34,11 +49,14 @@ anubis scan model.gguf --strict
 anubis scan model.gguf --format json
 anubis scan model.gguf --format sarif --fail-on high
 
+# Return exit code 1 if any scan coverage was incomplete
+anubis scan ~/.cache/huggingface/hub/models--org--repo --require-complete
+
 # Opt in to Hugging Face network checks (repo lookup + file sizes)
 anubis scan model.safetensors --online
 
 # Also stream local model files and compare SHA256 with upstream LFS OIDs
-anubis scan ~/.cache/huggingface/hub/models--org--repo --deep
+anubis scan ~/.cache/huggingface/hub/models--org--repo --deep --max-bytes 32GiB
 
 # Audit the host, local AI ports, and current workspace
 anubis audit --workspace .
@@ -51,6 +69,10 @@ anubis audit --workspace . --model model.gguf --online
 
 # Tune traversal and content-read budgets
 anubis audit --workspace . --max-files 5000 --max-depth 32 --max-bytes 1073741824 --max-seconds 60
+
+# Ask a separate local Ollama model for unverified regression-test ideas
+anubis scan model.gguf --format json > scan-report.json
+anubis redteam scan-report.json --model qwen2.5:14b
 ```
 
 `--deep` implies the online check. Online checks are opt-in; offline scans do not contact Hugging Face. Hash checking only succeeds when the Hub exposes an LFS SHA256 OID for the corresponding file.
@@ -61,15 +83,21 @@ The old `localguard` command remains as a compatibility alias; new usage should 
 
 ### Reports and scan limits
 
-`--format rich` is the default. `--format json` emits Anubis JSON schema version 1.0, and `--format sarif` emits SARIF 2.1.0. Findings include stable rule IDs, evidence, remediation, and a rule-class confidence estimate; confidence is **not** a calibrated probability. Exit code `0` means the selected failure policy passed, `1` means `--strict`/`--fail-on` was triggered, and `2` is used for CLI usage/validation errors.
+`--format rich` is the default. `--format json` emits Anubis JSON schema version 1.0, and `--format sarif` emits SARIF 2.1.0. Findings include stable rule IDs, evidence, remediation, and a rule-class confidence estimate; confidence is **not** a calibrated probability. Exit code `0` means the selected failure policy passed, `1` means `--strict`, `--fail-on`, or `--require-complete` was triggered, and `2` is used for CLI usage/validation errors. Incomplete scans are visibly marked even when `--require-complete` is not set.
 
-Defaults are 20,000 files, depth 64, 2 GiB of total bytes read, and 120 seconds per command. Budget exhaustion is reported as an informational finding, and incomplete scans do not claim a clean workspace. During directory walks, Anubis follows file symlinks that resolve inside the scan root (needed for Hugging Face cache snapshots), skips external links, and skips directory symlinks unless `--follow-symlinks` is specified. An explicitly selected file symlink is treated as a user-selected target.
+Defaults are 20,000 files, depth 64, 2 GiB of total bytes read (16 GiB with `--deep`), and 120 seconds per command. Use `--max-bytes 32GiB` for larger models. Budget exhaustion is reported as an informational finding, marks the report incomplete, and can be made an exit failure with `--require-complete`. During directory walks, Anubis follows file symlinks that resolve inside the scan root (needed for Hugging Face cache snapshots), skips external links, and skips directory symlinks unless `--follow-symlinks` is specified. An explicitly selected file symlink is treated as a user-selected target.
 
 ### Advisory refresh and fuzzing
 
 The bundled Ollama OSV snapshot is refreshed weekly by `.github/workflows/update-ollama-advisories.yml`, which opens a reviewable PR. New or changed records are informational until a maintainer reviews their ranges/severity. To refresh locally, install the project and run `python scripts/update_ollama_advisories.py`.
 
 Property-based no-crash tests run in the normal suite. Optional Atheris coverage-guided fuzzing is Linux-only: install with `pip install -e '.[fuzz]'`, then run `python scripts/fuzz_anubis.py gguf -runs=1000`. CI installs Clang/libFuzzer; Apple Clang on macOS does not include the libFuzzer runtime by default.
+
+Run the labeled sample corpus with `python scripts/benchmark_security_corpus.py`. Its cases are synthetic regression fixtures, not a representative measure of real-world detection rates.
+
+### Optional local red-team advisor
+
+`anubis redteam` sends a minimized JSON scan summary to an already-installed Ollama model at loopback by default. It does **not** load the scanned model, execute returned ideas, change findings/severity, or claim the target is safe. The output is unverified test hypotheses; review and validate them in a disposable environment. Remote endpoints require the explicit `--allow-remote` flag and receive the minimized report.
 
 ## Development
 

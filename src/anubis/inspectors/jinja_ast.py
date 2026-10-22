@@ -60,6 +60,7 @@ def audit_jinja_template(
 ) -> None:
     """Parses a Jinja2 chat template string into an AST and inspects for malicious patterns."""
     if len(template_str) > MAX_TEMPLATE_LENGTH:
+        report.mark_incomplete("chat template exceeded the parser length limit")
         report.add(
             layer="Layer 2 (Chat Template)",
             severity=Severity.INFO,
@@ -72,6 +73,7 @@ def audit_jinja_template(
         if budget:
             budget.check_time()
     except ScanLimitExceeded as exc:
+        report.mark_incomplete(f"chat template scan budget reached: {exc}")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -84,6 +86,7 @@ def audit_jinja_template(
     try:
         ast = env.parse(template_str)
     except Exception as exc:
+        report.mark_incomplete("chat template syntax prevented AST inspection")
         report.add(
             layer="Layer 2 (Chat Template)",
             severity=Severity.HIGH,
@@ -97,6 +100,7 @@ def audit_jinja_template(
         if budget:
             budget.check_time()
     except ScanLimitExceeded as exc:
+        report.mark_incomplete(f"chat template scan budget reached: {exc}")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,

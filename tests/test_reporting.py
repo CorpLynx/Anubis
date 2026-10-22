@@ -34,7 +34,13 @@ def test_json_report_contains_evidence_confidence_and_summary() -> None:
     assert payload["findings"][0]["evidence"] == "Tensor crosses EOF."
     assert 0 <= payload["findings"][0]["confidence"] <= 1
     assert payload["summary"]["by_severity"]["CRITICAL"] == 1
+    assert payload["summary"]["complete"] is True
     assert report_to_dict(report)["target"] == "model.gguf"
+
+    report.mark_incomplete("file budget reached")
+    incomplete_payload = report_to_dict(report)
+    assert incomplete_payload["summary"]["complete"] is False
+    assert incomplete_payload["summary"]["incomplete_reasons"] == ["file budget reached"]
 
 
 def test_sarif_report_has_driver_rules_and_result_metadata() -> None:
@@ -95,3 +101,14 @@ def test_fail_on_thresholds_and_strict_alias() -> None:
     assert cli._should_fail(report, cli.FailureThreshold.MEDIUM)
     assert not cli._should_fail(report, cli.FailureThreshold.HIGH)
     assert not cli._should_fail(report, cli.FailureThreshold.NEVER, strict=True)
+    report.mark_incomplete("test budget")
+    assert cli._should_fail(report, cli.FailureThreshold.NEVER, require_complete=True)
+
+
+def test_require_complete_cli_option_is_exposed() -> None:
+    from typer.testing import CliRunner
+
+    result = CliRunner().invoke(cli.app, ["scan", "--help"])
+    assert result.exit_code == 0
+    assert "--require-complete" in result.stdout
+    assert "--max-bytes" in result.stdout

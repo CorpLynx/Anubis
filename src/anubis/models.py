@@ -82,6 +82,13 @@ def default_confidence(layer: str, severity: Severity, title: str) -> float:
 class ScanReport:
     target: str
     findings: list[Finding] = field(default_factory=list)
+    complete: bool = True
+    incomplete_reasons: list[str] = field(default_factory=list)
+
+    def mark_incomplete(self, reason: str) -> None:
+        self.complete = False
+        if reason not in self.incomplete_reasons:
+            self.incomplete_reasons.append(reason)
 
     def add(
         self,

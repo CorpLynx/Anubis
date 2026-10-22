@@ -37,6 +37,8 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Run test suite
         run: python -m pytest -v
+      - name: Run labeled threat corpus benchmark
+        run: python scripts/benchmark_security_corpus.py
 
   fuzz-smoke:
     runs-on: ubuntu-latest

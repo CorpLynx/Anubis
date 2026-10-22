@@ -41,7 +41,12 @@ def report_to_dict(report: ScanReport) -> dict[str, Any]:
         "schema_version": JSON_SCHEMA_VERSION,
         "tool": {"name": "Anubis", "version": "0.1.0"},
         "target": report.target,
-        "summary": {"total": len(report.findings), "by_severity": report.counts_by_severity()},
+        "summary": {
+            "total": len(report.findings),
+            "by_severity": report.counts_by_severity(),
+            "complete": report.complete,
+            "incomplete_reasons": report.incomplete_reasons,
+        },
         "confidence_note": "Confidence values are rule-class estimates, not calibrated probabilities.",
         "findings": [_finding_to_dict(finding) for finding in report.findings],
     }
@@ -137,7 +142,12 @@ def report_to_sarif(report: ScanReport) -> dict[str, Any]:
                 "results": results,
                 "properties": {
                     "target": report.target,
-                    "summary": {"total": len(report.findings), "bySeverity": report.counts_by_severity()},
+                    "summary": {
+                        "total": len(report.findings),
+                        "bySeverity": report.counts_by_severity(),
+                        "complete": report.complete,
+                        "incompleteReasons": report.incomplete_reasons,
+                    },
                 },
             }
         ],

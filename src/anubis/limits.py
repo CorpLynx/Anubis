@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import time
 from pathlib import Path
@@ -14,6 +15,34 @@ DEFAULT_SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", ".pytest_cache",
     ".ruff_cache", ".eggs", "build", "dist",
 }
+DEFAULT_MAX_BYTES = 2 * 1024**3
+DEFAULT_DEEP_MAX_BYTES = 16 * 1024**3
+_BYTE_SIZE_RE = re.compile(
+    r"^\s*(\d+)\s*(b|k|kb|kib|m|mb|mib|g|gb|gib|t|tb|tib)?\s*$", re.IGNORECASE
+)
+
+
+def parse_byte_size(value: str | None, *, deep: bool = False) -> int:
+    """Parse CLI byte limits such as `536870912`, `4G`, `4GB`, or `4GiB`."""
+    if value is None:
+        return DEFAULT_DEEP_MAX_BYTES if deep else DEFAULT_MAX_BYTES
+    match = _BYTE_SIZE_RE.fullmatch(value)
+    if not match:
+        raise ValueError("use an integer byte count or a suffix such as KB, MiB, GB, or GiB")
+    amount = int(match.group(1))
+    suffix = (match.group(2) or "b").lower()
+    power = {
+        "b": 0, "k": 1, "kb": 1, "kib": 1, "m": 2, "mb": 2, "mib": 2,
+        "g": 3, "gb": 3, "gib": 3, "t": 4, "tb": 4, "tib": 4,
+    }[suffix]
+    if suffix in {"kb", "mb", "gb", "tb"}:
+        multiplier = 1000**power
+    else:
+        multiplier = 1024**power
+    result = amount * multiplier
+    if result < 1:
+        raise ValueError("byte limit must be at least one byte")
+    return result
 
 
 class ScanLimitExceeded(Exception):
@@ -248,6 +277,7 @@ class ScanBudget:
             details.append(f"skipped {self.skipped_symlinks} symlink(s)")
         if self.skipped_paths:
             details.append(f"skipped {self.skipped_paths} unreadable/depth-limited path(s)")
+        report.mark_incomplete("; ".join(details))
         report.add(
             layer="Scanner",
             severity=Severity.INFO,

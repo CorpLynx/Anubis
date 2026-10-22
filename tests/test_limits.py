@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from anubis.limits import ScanBudget, ScanLimitExceeded
+from anubis.limits import ScanBudget, ScanLimitExceeded, parse_byte_size
 from anubis.inspectors.env_audit import audit_workspace_secrets
 from anubis.models import ScanReport, Severity
 
@@ -23,6 +23,8 @@ def test_file_count_limit_stops_walk_and_reports_incompleteness(tmp_path: Path) 
     assert "file-count limit" in budget.reasons
     assert report.findings[0].severity == Severity.INFO
     assert "incomplete" in report.findings[0].description
+    assert report.complete is False
+    assert report.incomplete_reasons
 
 
 def test_max_depth_does_not_descend_and_reports_skipped_directory(tmp_path: Path) -> None:
@@ -49,6 +51,15 @@ def test_byte_budget_raises_before_exceeding_limit() -> None:
     with pytest.raises(ScanLimitExceeded):
         budget.consume_bytes(1)
     assert budget.bytes_read == 4
+
+
+def test_byte_size_parser_has_a_larger_deep_default_and_binary_suffixes() -> None:
+    assert parse_byte_size(None) == 2 * 1024**3
+    assert parse_byte_size(None, deep=True) == 16 * 1024**3
+    assert parse_byte_size("4GiB") == 4 * 1024**3
+    assert parse_byte_size("4GB") == 4 * 1000**3
+    with pytest.raises(ValueError):
+        parse_byte_size("0")
 
 
 def test_internal_file_symlink_is_allowed_but_external_link_is_skipped(tmp_path: Path) -> None:

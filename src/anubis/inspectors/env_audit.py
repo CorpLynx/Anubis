@@ -66,14 +66,26 @@ OLLAMA_ADVISORY_DATABASE = _load_ollama_advisory_database()
 OLLAMA_ADVISORIES: list[dict[str, Any]] = OLLAMA_ADVISORY_DATABASE["advisories"]
 OLLAMA_ADVISORY_SNAPSHOT: str = OLLAMA_ADVISORY_DATABASE["snapshot_date"]
 
-SECRET_FILE_NAMES = {".env", ".env.local", ".env.production", "id_rsa", "id_ed25519", "credentials"}
+SECRET_FILE_NAMES = {
+    ".env", ".env.local", ".env.production", ".env.development", ".env.test", ".envrc",
+    ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "credentials",
+    "service-account.json",
+}
 
 SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("OpenAI API Key", re.compile(r"sk-(?:proj-)?[A-Za-z0-9_\-]{32,}")),
     ("Hugging Face Token", re.compile(r"hf_[A-Za-z0-9]{30,}")),
     ("Anthropic API Key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{32,}")),
-    ("GitHub PAT", re.compile(r"ghp_[A-Za-z0-9]{30,}")),
-    ("AWS Access Key", re.compile(r"AKIA[0-9A-Z]{16}")),
+    ("GitHub PAT", re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})")),
+    ("AWS Access Key ID", re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")),
+    ("AWS Secret Access Key", re.compile(r"(?i)(?:aws_secret_access_key|aws_secret_key)\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
+    ("Google API Key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
+    ("GCP Private Key Material", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
+    ("Slack Token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("Stripe Secret Key", re.compile(r"(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}")),
+    ("npm Token", re.compile(r"npm_[A-Za-z0-9]{36}")),
+    ("PyPI Token", re.compile(r"pypi-[A-Za-z0-9_-]{50,}")),
+    ("Cloud Client Secret", re.compile(r"(?i)(?:azure_client_secret|client_secret)\s*[:=]\s*['\"]?[A-Za-z0-9~._\-]{20,}")),
 ]
 
 
@@ -291,6 +303,7 @@ def audit_network_ports(
         try:
             budget.check_time()
         except ScanLimitExceeded:
+            report.mark_incomplete("network audit skipped by time limit")
             report.add(
                 layer="Scanner",
                 severity=Severity.INFO,
@@ -301,6 +314,7 @@ def audit_network_ports(
     if listeners is None:
         listeners = _collect_listeners(budget=budget)
         if listeners is None:
+            report.mark_incomplete("socket table was unavailable")
             report.add(
                 layer="Layer 4 (Network Exposure)",
                 severity=Severity.INFO,
@@ -328,6 +342,7 @@ def audit_network_ports(
             try:
                 budget.check_time()
             except ScanLimitExceeded:
+                report.mark_incomplete("network listener audit reached time limit")
                 report.add(
                     layer="Scanner",
                     severity=Severity.INFO,
@@ -498,6 +513,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
         output = (proc.stdout or proc.stderr).strip()
         match = VERSION_RE.search(output)
         if not match:
+            report.mark_incomplete("Ollama version could not be parsed")
             report.add(
                 layer="Layer 3 (Runner Security)",
                 severity=Severity.INFO,
@@ -507,6 +523,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
             return
 
         if not OLLAMA_ADVISORIES:
+            report.mark_incomplete("Ollama advisory database unavailable")
             report.add(
                 layer="Layer 3 (Runner Security)",
                 severity=Severity.INFO,
@@ -523,6 +540,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
             snapshot_date = date.fromisoformat(OLLAMA_ADVISORY_SNAPSHOT)
             age_days = (date.today() - snapshot_date).days
             if age_days > 90:
+                report.mark_incomplete("Ollama advisory snapshot is older than 90 days")
                 report.add(
                     layer="Layer 3 (Runner Security)",
                     severity=Severity.INFO,
@@ -535,6 +553,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
                     location="https://osv.dev/",
                 )
         except ValueError:
+            report.mark_incomplete("Ollama advisory snapshot date is invalid")
             report.add(
                 layer="Layer 3 (Runner Security)",
                 severity=Severity.INFO,
@@ -589,6 +608,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
             description="No global `ollama` CLI found in PATH (using Python/MLX directly).",
         )
     except ScanLimitExceeded as exc:
+        report.mark_incomplete("Ollama version query skipped by time limit")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -596,6 +616,7 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
             description=str(exc),
         )
     except Exception as exc:
+        report.mark_incomplete("Ollama version check failed")
         report.add(
             layer="Layer 3 (Runner Security)",
             severity=Severity.INFO,
@@ -611,6 +632,14 @@ def audit_workspace_secrets(
 ) -> None:
     """Scans an AI agent's working directory for exposed .env files or hardcoded API keys."""
     if not workspace_dir.exists() or not workspace_dir.is_dir():
+        report.mark_incomplete("workspace path is missing or not a directory")
+        report.add(
+            layer="Layer 5 (Agent Workspace)",
+            severity=Severity.INFO,
+            title="Workspace Secret Scan Skipped",
+            description="The requested workspace path does not exist or is not a directory.",
+            location=str(workspace_dir),
+        )
         return
 
     own_budget = budget is None
@@ -636,7 +665,10 @@ def audit_workspace_secrets(
                 )
                 secrets_found += 1
 
-            if fpath.suffix.lower() in {".py", ".json", ".yaml", ".yml", ".sh", ".env", ".txt", ".toml", ".js", ".ts"} or fname.startswith(".env"):
+            if fpath.suffix.lower() in {
+                ".py", ".json", ".yaml", ".yml", ".sh", ".env", ".txt", ".toml", ".js", ".ts",
+                ".pem", ".key", ".ini", ".conf", ".cfg", ".properties", ".md",
+            } or fname.startswith(".env") or fname in SECRET_FILE_NAMES:
                 size = fpath.stat().st_size
                 if size > 2 * 1024 * 1024:
                     budget.note("workspace single-file read limit")

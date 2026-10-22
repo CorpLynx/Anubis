@@ -174,6 +174,7 @@ def verify_upstream(
     """
     repo_id = _derive_repo_id(path, gguf_metadata or {})
     if repo_id is None:
+        report.mark_incomplete("HF repository ID could not be derived for online verification")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
@@ -189,6 +190,7 @@ def verify_upstream(
     try:
         snapshot_root, snapshot_revision, ambiguous_snapshots = _select_local_snapshot(path, budget)
     except ScanLimitExceeded as exc:
+        report.mark_incomplete("HF snapshot reference could not be inspected within scan limits")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -202,6 +204,7 @@ def verify_upstream(
         encoded_repo_id = quote(repo_id, safe="/")
         info = _get_json(f"{HF_API_BASE}/{encoded_repo_id}", timeout=timeout, budget=budget)
     except urllib.error.HTTPError as exc:
+        report.mark_incomplete(f"HF repository lookup did not complete successfully (HTTP {exc.code})")
         if exc.code in (401, 403, 404):
             report.add(
                 layer="Layer 5 (Upstream Verification)",
@@ -225,6 +228,7 @@ def verify_upstream(
             )
         return
     except Exception as exc:
+        report.mark_incomplete("HF repository lookup was unavailable")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
@@ -235,6 +239,7 @@ def verify_upstream(
         return
 
     if not isinstance(info, dict):
+        report.mark_incomplete("HF repository API response was malformed")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
@@ -307,6 +312,7 @@ def verify_upstream(
         )
 
     if ambiguous_snapshots:
+        report.mark_incomplete("multiple HF snapshots could not be mapped to one upstream revision")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
@@ -328,11 +334,23 @@ def verify_upstream(
             budget=budget,
         )
     except Exception:
+        report.mark_incomplete("HF upstream file tree was unavailable")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
             title="Upstream File Tree Unavailable",
             description=f"Could not fetch the file listing for '{repo_id}'; size/hash comparison skipped.",
+            location=str(path),
+        )
+        return
+
+    if not isinstance(tree, list):
+        report.mark_incomplete("HF upstream file tree response was malformed")
+        report.add(
+            layer="Layer 5 (Upstream Verification)",
+            severity=Severity.INFO,
+            title="Malformed HF File Tree Response",
+            description="The Hub did not return a file list; local weight comparison was skipped.",
             location=str(path),
         )
         return
@@ -362,6 +380,7 @@ def verify_upstream(
         local_weights = [p for p in local_weights if p.suffix.lower() in WEIGHT_SUFFIXES]
 
     if not local_weights:
+        report.mark_incomplete("no supported local weight files were available for upstream comparison")
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.INFO,
@@ -409,6 +428,7 @@ def verify_upstream(
         try:
             local_size = local_file.stat().st_size
         except OSError as exc:
+            report.mark_incomplete(f"local weight could not be stat'ed: {local_file.name}")
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.INFO,
@@ -420,6 +440,7 @@ def verify_upstream(
 
         upstream_size = entry.get("size")
         if not isinstance(upstream_size, int) or isinstance(upstream_size, bool) or upstream_size < 0:
+            report.mark_incomplete(f"upstream size metadata was invalid for {local_file.name}")
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.INFO,
@@ -451,6 +472,7 @@ def verify_upstream(
             try:
                 local_sha256 = _sha256_of(local_file, budget=budget)
             except (OSError, ScanLimitExceeded) as exc:
+                report.mark_incomplete(f"deep hash was incomplete for {local_file.name}")
                 report.add(
                     layer="Layer 5 (Upstream Verification)",
                     severity=Severity.INFO,
@@ -474,6 +496,7 @@ def verify_upstream(
                     location=str(local_file),
                 )
         elif deep and not oid:
+            report.mark_incomplete(f"upstream provided no SHA256 OID for {local_file.name}")
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.INFO,

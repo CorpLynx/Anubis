@@ -9,6 +9,7 @@ import math
 import struct
 from pathlib import Path
 
+from anubis.inspectors.env_audit import audit_workspace_secrets
 from anubis.inspectors.gguf_inspector import verify_gguf_file
 from anubis.inspectors.jinja_ast import audit_jinja_template, _shannon_entropy
 from anubis.inspectors.safetensors_mlx import (
@@ -506,3 +507,29 @@ def test_workspace_secret_scanner(tmp_path: Path) -> None:
     assert any("AWS Access Key" in f.title for f in high)
     assert any("OpenAI API Key" in f.title for f in high)
     assert any("id_ed25519" in f.title for f in high)
+
+
+def test_workspace_secret_scanner_covers_common_provider_tokens(tmp_path: Path) -> None:
+    samples = {
+        "github.toml": "github_pat_" + "g" * 24,
+        "google.env": "GOOGLE_API_KEY=AIza" + "A" * 35,
+        "slack.json": '"token":"xoxb-' + "a" * 24 + '"',
+        "stripe.cfg": "stripe_key=sk_live_" + "s" * 24,
+        "aws.ini": "aws_secret_access_key=" + "A" * 40,
+        "private.pem": "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+        ".npmrc": "//registry.npmjs.org/:_authToken=npm_" + "n" * 36,
+    }
+    for name, content in samples.items():
+        (tmp_path / name).write_text(content)
+    report = ScanReport(target=str(tmp_path))
+
+    audit_workspace_secrets(tmp_path, report)
+
+    titles = {finding.title for finding in report.findings}
+    assert any("GitHub PAT" in title for title in titles)
+    assert any("Google API Key" in title for title in titles)
+    assert any("Slack Token" in title for title in titles)
+    assert any("Stripe Secret Key" in title for title in titles)
+    assert any("AWS Secret Access Key" in title for title in titles)
+    assert any("Private Key Material" in title for title in titles)
+    assert any("npm Token" in title for title in titles)

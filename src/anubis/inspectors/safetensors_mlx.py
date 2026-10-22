@@ -63,6 +63,7 @@ def verify_safetensors_file(
     try:
         file_size = path.stat().st_size
     except OSError as exc:
+        report.mark_incomplete("Safetensors file could not be read")
         report.add(
             layer="Layer 1 (Safetensors/MLX)",
             severity=Severity.CRITICAL,
@@ -72,6 +73,7 @@ def verify_safetensors_file(
         )
         return {}
     if file_size < 8:
+        report.mark_incomplete("Safetensors file is truncated")
         report.add(
             layer="Layer 1 (Safetensors/MLX)",
             severity=Severity.CRITICAL,
@@ -90,6 +92,7 @@ def verify_safetensors_file(
                 raise OSError("file changed or became truncated during scan")
             header_len = struct.unpack("<Q", size_bytes)[0]
             if header_len == 0 or header_len > MAX_HEADER_SIZE or (8 + header_len) > file_size:
+                report.mark_incomplete("Safetensors header was outside supported size/bounds")
                 report.add(
                     layer="Layer 1 (Safetensors/MLX)",
                     severity=Severity.CRITICAL,
@@ -109,6 +112,7 @@ def verify_safetensors_file(
             if len(raw_header) != header_len:
                 raise OSError("file changed or became truncated while reading its header")
     except ScanLimitExceeded as exc:
+        report.mark_incomplete(f"Safetensors scan budget reached: {exc}")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -118,6 +122,7 @@ def verify_safetensors_file(
         )
         return {}
     except OSError as exc:
+        report.mark_incomplete("Safetensors file changed or became unreadable")
         report.add(
             layer="Layer 1 (Safetensors/MLX)",
             severity=Severity.CRITICAL,
@@ -130,6 +135,7 @@ def verify_safetensors_file(
     try:
         header = json.loads(raw_header.decode("utf-8"))
     except Exception as exc:
+        report.mark_incomplete("Safetensors JSON header could not be parsed")
         report.add(
             layer="Layer 1 (Safetensors/MLX)",
             severity=Severity.CRITICAL,
@@ -140,6 +146,7 @@ def verify_safetensors_file(
         return {}
 
     if not isinstance(header, dict):
+        report.mark_incomplete("Safetensors JSON header was not an object")
         report.add(
             layer="Layer 1 (Safetensors/MLX)",
             severity=Severity.CRITICAL,
@@ -285,6 +292,7 @@ def audit_python_file_ast(
     try:
         size = py_path.stat().st_size
         if size > 2 * 1024 * 1024:
+            report.mark_incomplete("model Python source exceeded the 2 MiB AST limit")
             report.add(
                 layer="Layer 1 (MLX/HF Code)",
                 severity=Severity.INFO,
@@ -298,6 +306,7 @@ def audit_python_file_ast(
         source = py_path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(source, filename=str(py_path))
     except ScanLimitExceeded as exc:
+        report.mark_incomplete(f"model Python source scan budget reached: {exc}")
         report.add(
             layer="Scanner",
             severity=Severity.INFO,
@@ -307,6 +316,7 @@ def audit_python_file_ast(
         )
         return
     except Exception as exc:
+        report.mark_incomplete("model Python source could not be parsed")
         report.add(
             layer="Layer 1 (MLX/HF Code)",
             severity=Severity.MEDIUM,
@@ -397,6 +407,7 @@ def _audit_mlx_quantization(
         or isinstance(group_size, bool)
         or group_size <= 0
     ):
+        report.mark_incomplete("MLX quantization parameters are invalid")
         report.add(
             layer="Layer 1 (MLX Quantization)",
             severity=Severity.HIGH,
@@ -415,6 +426,7 @@ def _audit_mlx_quantization(
         weight_name = f"{prefix}.weight"
         weight_shape = tensor_shapes.get(weight_name)
         if not weight_shape:
+            report.mark_incomplete(f"weight tensor missing for quantized scales {scales_name}")
             report.add(
                 layer="Layer 1 (MLX Quantization)",
                 severity=Severity.HIGH,
@@ -469,6 +481,7 @@ def _audit_mlx_quantization(
             location=str(config_path),
         )
     elif not matched and errors == 0:
+        report.mark_incomplete("MLX quantization tensor ratios could not be verified")
         report.add(
             layer="Layer 1 (MLX Quantization)",
             severity=Severity.INFO,
@@ -537,6 +550,7 @@ def inspect_model_directory(
         try:
             size = cfg_path.stat().st_size
             if size > MAX_MODEL_CONFIG_SIZE:
+                report.mark_incomplete(f"model config exceeded {MAX_MODEL_CONFIG_SIZE}-byte scan limit")
                 report.add(
                     layer="Layer 1 (MLX/HF Config)",
                     severity=Severity.MEDIUM,
@@ -550,6 +564,7 @@ def inspect_model_directory(
             text_cache[cfg_path] = content
             cfg = json.loads(content)
             if not isinstance(cfg, dict):
+                report.mark_incomplete("model config JSON was not an object")
                 report.add(
                     layer="Layer 1 (MLX/HF Config)",
                     severity=Severity.MEDIUM,
@@ -572,6 +587,7 @@ def inspect_model_directory(
             if isinstance(cfg.get("quantization"), dict):
                 quant_configs.append((cfg, cfg_path))
         except ScanLimitExceeded as exc:
+            report.mark_incomplete(f"model config scan budget reached: {exc}")
             report.add(
                 layer="Scanner",
                 severity=Severity.INFO,
@@ -580,6 +596,7 @@ def inspect_model_directory(
                 location=str(cfg_path),
             )
         except (OSError, json.JSONDecodeError) as exc:
+            report.mark_incomplete("model config could not be inspected")
             report.add(
                 layer="Layer 1 (MLX/HF Config)",
                 severity=Severity.MEDIUM,
@@ -610,6 +627,7 @@ def inspect_model_directory(
             else:
                 size = tok_cfg_path.stat().st_size
                 if size > MAX_MODEL_CONFIG_SIZE:
+                    report.mark_incomplete("tokenizer config exceeded the config scan limit")
                     continue
                 budget.consume_bytes(size)
                 text_cache[tok_cfg_path] = tok_cfg_path.read_text(encoding="utf-8", errors="replace")
@@ -625,6 +643,7 @@ def inspect_model_directory(
                     if isinstance(entry, dict) and isinstance(entry.get("template"), str)
                 )
         except ScanLimitExceeded as exc:
+            report.mark_incomplete(f"tokenizer config scan budget reached: {exc}")
             report.add(
                 layer="Scanner",
                 severity=Severity.INFO,
@@ -633,7 +652,7 @@ def inspect_model_directory(
                 location=str(tok_cfg_path),
             )
         except (OSError, json.JSONDecodeError):
-            pass
+            report.mark_incomplete("tokenizer config could not be inspected")
 
     for jinja_file in (p for p in files if p.name == "chat_template.jinja"):
         if budget.stop_requested:
@@ -641,6 +660,7 @@ def inspect_model_directory(
         try:
             size = jinja_file.stat().st_size
             if size > 1024 * 1024:
+                report.mark_incomplete("chat template exceeded 1 MiB parsing limit")
                 report.add(
                     layer="Layer 2 (Chat Template)",
                     severity=Severity.INFO,
@@ -652,6 +672,7 @@ def inspect_model_directory(
             budget.consume_bytes(size)
             chat_templates.append(jinja_file.read_text(encoding="utf-8", errors="replace"))
         except ScanLimitExceeded as exc:
+            report.mark_incomplete(f"chat template scan budget reached: {exc}")
             report.add(
                 layer="Scanner",
                 severity=Severity.INFO,
@@ -660,7 +681,7 @@ def inspect_model_directory(
                 location=str(jinja_file),
             )
         except OSError:
-            pass
+            report.mark_incomplete("chat template file could not be read")
 
     if own_budget:
         budget.add_summary_finding(report, str(model_dir))

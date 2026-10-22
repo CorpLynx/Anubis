@@ -1,6 +1,7 @@
 """Rich and machine-readable CLI for Anubis model and host audits."""
 
 from enum import Enum
+import json
 from pathlib import Path
 from typing import Any, Optional
 
@@ -15,9 +16,10 @@ from anubis.inspectors.gguf_inspector import verify_gguf_file
 from anubis.inspectors.jinja_ast import audit_jinja_template
 from anubis.inspectors.provenance import audit_model_provenance, verify_upstream
 from anubis.inspectors.safetensors_mlx import inspect_model_directory, verify_safetensors_file
-from anubis.limits import ScanBudget, ScanLimitExceeded
+from anubis.limits import ScanBudget, ScanLimitExceeded, parse_byte_size
 from anubis.models import ScanReport, Severity
 from anubis.reporting import report_to_json, report_to_sarif_json
+from anubis.redteam import RedTeamReviewError, generate_redteam_hypotheses
 
 app = typer.Typer(
     name="anubis",
@@ -79,8 +81,11 @@ def _render_report(report: ScanReport, output_format: OutputFormat = OutputForma
 
     console.print(
         Panel.fit(
-            f"[bold cyan]Anubis Security Audit[/bold cyan]\nTarget: [white]{_safe_rich_text(report.target)}[/white]",
-            border_style="cyan",
+            (
+                f"[bold red]Anubis Scan INCOMPLETE[/bold red]"
+                if not report.complete else "[bold cyan]Anubis Security Audit[/bold cyan]"
+            ) + f"\nTarget: [white]{_safe_rich_text(report.target)}[/white]",
+            border_style="red" if not report.complete else "cyan",
         )
     )
     table = Table(show_header=True, header_style="bold magenta", expand=True)
@@ -126,6 +131,7 @@ def _scan_path_target(
                 with open(target, "rb") as stream:
                     magic = stream.read(4)
             except (OSError, ScanLimitExceeded) as exc:
+                report.mark_incomplete("file prefix could not be checked")
                 report.add(
                     layer="Scanner",
                     severity=Severity.INFO,
@@ -142,6 +148,7 @@ def _scan_path_target(
                     audit_jinja_template(template, f"{target.name}:tokenizer.chat_template", report, budget=budget)
                 audit_model_provenance(target, metadata, report)
             else:
+                report.mark_incomplete(f"unsupported file type: {target.suffix or target.name}")
                 report.add(
                     layer="Scanner",
                     severity=Severity.INFO,
@@ -173,7 +180,14 @@ def _scan_path_target(
     return gguf_metadata
 
 
-def _should_fail(report: ScanReport, threshold: FailureThreshold, strict: bool = False) -> bool:
+def _should_fail(
+    report: ScanReport,
+    threshold: FailureThreshold,
+    strict: bool = False,
+    require_complete: bool = False,
+) -> bool:
+    if require_complete and not report.complete:
+        return True
     if strict:
         threshold_rank = SEVERITY_RANK[Severity.HIGH]
     elif threshold == FailureThreshold.NEVER:
@@ -188,15 +202,37 @@ def _should_fail(report: ScanReport, threshold: FailureThreshold, strict: bool =
     return any(SEVERITY_RANK[finding.severity] >= threshold_rank for finding in report.findings)
 
 
+def _make_budget(
+    max_files: int,
+    max_depth: int,
+    max_bytes: Optional[str],
+    max_seconds: float,
+    follow_symlinks: bool,
+    deep: bool,
+) -> ScanBudget:
+    try:
+        byte_limit = parse_byte_size(max_bytes, deep=deep)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--max-bytes") from exc
+    return ScanBudget(
+        max_files=max_files,
+        max_depth=max_depth,
+        max_bytes=byte_limit,
+        max_seconds=max_seconds,
+        follow_symlinks=follow_symlinks,
+    )
+
+
 @app.command("scan")
 def scan_command(
     path: Path = typer.Argument(..., exists=True, help="Path to a .gguf file, .safetensors file, or MLX/HF directory."),
     fail_on_high: bool = typer.Option(False, "--strict", help="Exit 1 for HIGH or CRITICAL findings."),
+    require_complete: bool = typer.Option(False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."),
     fail_on: FailureThreshold = typer.Option(FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."),
     output_format: OutputFormat = typer.Option(OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."),
     max_files: int = typer.Option(20_000, "--max-files", min=1, help="Maximum files visited across the scan."),
     max_depth: int = typer.Option(64, "--max-depth", min=0, help="Maximum directory nesting depth."),
-    max_bytes: int = typer.Option(2 * 1024**3, "--max-bytes", min=1, help="Maximum total bytes read, including headers, API responses, and --deep hashes."),
+    max_bytes: Optional[str] = typer.Option(None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."),
     max_seconds: float = typer.Option(120.0, "--max-seconds", min=0.1, help="Maximum scan wall-clock time."),
     follow_symlinks: bool = typer.Option(False, "--follow-symlinks", help="Traverse internal directory symlinks; links outside the target root are skipped."),
     online: bool = typer.Option(False, "--online", help="Verify provenance and file integrity against the live Hugging Face Hub API."),
@@ -204,14 +240,14 @@ def scan_command(
 ) -> None:
     """Scan a specific local model file (.gguf, .safetensors) or MLX / Hugging Face directory."""
     report = ScanReport(target=str(path.resolve()))
-    budget = ScanBudget(max_files=max_files, max_depth=max_depth, max_bytes=max_bytes, max_seconds=max_seconds, follow_symlinks=follow_symlinks)
+    budget = _make_budget(max_files, max_depth, max_bytes, max_seconds, follow_symlinks, deep)
     discovered_files: list[Path] = []
     metadata = _scan_path_target(path, report, budget, discovered_files)
     if online or deep:
         verify_upstream(path, report, deep=deep, gguf_metadata=metadata, budget=budget, local_files=discovered_files)
     budget.add_summary_finding(report, str(path))
     _render_report(report, output_format)
-    if _should_fail(report, fail_on, strict=fail_on_high):
+    if _should_fail(report, fail_on, strict=fail_on_high, require_complete=require_complete):
         raise typer.Exit(code=1)
 
 
@@ -223,29 +259,70 @@ def audit_command(
     online: bool = typer.Option(False, "--online", help="With --model: verify provenance against the live Hugging Face Hub API."),
     deep: bool = typer.Option(False, "--deep", help="With --online: stream SHA256 hash verification against upstream LFS OIDs."),
     fail_on_high: bool = typer.Option(False, "--strict", help="Exit 1 for HIGH or CRITICAL findings."),
+    require_complete: bool = typer.Option(False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."),
     fail_on: FailureThreshold = typer.Option(FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."),
     output_format: OutputFormat = typer.Option(OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."),
     max_files: int = typer.Option(20_000, "--max-files", min=1, help="Maximum files visited across the scan."),
     max_depth: int = typer.Option(64, "--max-depth", min=0, help="Maximum directory nesting depth."),
-    max_bytes: int = typer.Option(2 * 1024**3, "--max-bytes", min=1, help="Maximum total bytes read, including headers, API responses, and --deep hashes."),
+    max_bytes: Optional[str] = typer.Option(None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."),
     max_seconds: float = typer.Option(120.0, "--max-seconds", min=0.1, help="Maximum scan wall-clock time."),
     follow_symlinks: bool = typer.Option(False, "--follow-symlinks", help="Traverse internal directory symlinks; links outside the target root are skipped."),
 ) -> None:
     """Audit the local environment (network, runners, workspace secrets, optional model)."""
     report = ScanReport(target=f"System & Workspace ({workspace.resolve()})")
-    budget = ScanBudget(max_files=max_files, max_depth=max_depth, max_bytes=max_bytes, max_seconds=max_seconds, follow_symlinks=follow_symlinks)
+    budget = _make_budget(max_files, max_depth, max_bytes, max_seconds, follow_symlinks, deep)
     audit_runner_versions(report, budget=budget)
     audit_network_ports(report, probe=not no_probe, budget=budget)
-    audit_workspace_secrets(workspace.resolve(), report, budget=budget)
+    if not workspace.exists() or not workspace.is_dir():
+        report.mark_incomplete("workspace directory does not exist or is not a directory")
+    else:
+        audit_workspace_secrets(workspace.resolve(), report, budget=budget)
     if model_path and model_path.exists():
         discovered_files: list[Path] = []
         metadata = _scan_path_target(model_path, report, budget, discovered_files)
         if online or deep:
             verify_upstream(model_path, report, deep=deep, gguf_metadata=metadata, budget=budget, local_files=discovered_files)
+    elif model_path is not None:
+        report.mark_incomplete("requested model path does not exist")
     budget.add_summary_finding(report, str(workspace.resolve()))
     _render_report(report, output_format)
-    if _should_fail(report, fail_on, strict=fail_on_high):
+    if _should_fail(report, fail_on, strict=fail_on_high, require_complete=require_complete):
         raise typer.Exit(code=1)
+
+
+@app.command("redteam")
+def redteam_command(
+    report_path: Path = typer.Argument(..., exists=True, dir_okay=False, help="Anubis JSON report to review; only minimized findings are sent to the local advisor."),
+    model: str = typer.Option(..., "--model", "-m", help="Already-installed local Ollama model to use for test hypotheses."),
+    endpoint: str = typer.Option("http://127.0.0.1:11434", "--endpoint", help="Ollama origin. Must be loopback unless --allow-remote is explicit."),
+    allow_remote: bool = typer.Option(False, "--allow-remote", help="Permit sending the minimized report to a non-loopback Ollama endpoint."),
+    timeout: float = typer.Option(90.0, "--timeout", min=0.1, max=300.0, help="Maximum reviewer request time in seconds."),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write suggestions to a new JSON file instead of stdout."),
+) -> None:
+    """Generate unverified test ideas with a local Ollama model; never runs the scanned model."""
+    try:
+        result = generate_redteam_hypotheses(
+            report_path,
+            model=model,
+            endpoint=endpoint,
+            allow_remote=allow_remote,
+            timeout=timeout,
+        )
+    except RedTeamReviewError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    rendered = json.dumps(result, indent=2, ensure_ascii=True) + "\n"
+    if output is None:
+        console.file.write(rendered)
+        console.file.flush()
+    else:
+        try:
+            with output.open("x", encoding="utf-8") as stream:
+                stream.write(rendered)
+        except FileExistsError as exc:
+            raise typer.BadParameter("output file already exists; choose a new path", param_hint="--output") from exc
+        except OSError as exc:
+            raise typer.BadParameter(f"could not write output ({exc.__class__.__name__})", param_hint="--output") from exc
 
 
 if __name__ == "__main__":
