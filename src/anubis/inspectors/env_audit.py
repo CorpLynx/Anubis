@@ -9,6 +9,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import date
 from importlib.resources import files as package_files
 from pathlib import Path
@@ -33,6 +34,15 @@ AI_SERVICE_ENDPOINTS: dict[int, list[str]] = {
     8000: ["/v1/models", "/health"],
     8080: ["/models", "/health"],
 }
+
+PROCESS_SIGNATURES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("ollama",), "Ollama API"),
+    (("lm studio", "lmstudio"), "LM Studio Server"),
+    (("llama-server", "llama.cpp"), "llama.cpp Server"),
+    (("vllm", "vllm."), "vLLM Server"),
+    (("mlx_audio", "mlx-audio"), "mlx-audio Server"),
+    (("localai", "local-ai"), "LocalAI Server"),
+)
 
 PROBE_ORIGIN = "https://anubis-probe.invalid"
 PROBE_TIMEOUT_SECONDS = 2.0
@@ -67,6 +77,44 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+@dataclass(frozen=True)
+class Listener:
+    ip: str
+    port: int
+    service: str
+    process: Optional[str] = None
+    pid: Optional[int] = None
+
+
+def _service_from_process_text(text: str) -> Optional[str]:
+    lowered = text.lower()
+    for signatures, service in PROCESS_SIGNATURES:
+        if any(signature in lowered for signature in signatures):
+            return service
+    return None
+
+
+def _process_identity(pid: Optional[int]) -> tuple[Optional[str], Optional[str]]:
+    if pid is None:
+        return None, None
+    try:
+        process = psutil.Process(pid)
+        name = process.name()
+        try:
+            executable = process.exe()
+        except (psutil.AccessDenied, psutil.Error, OSError):
+            executable = ""
+        try:
+            command = " ".join(process.cmdline())
+        except (psutil.AccessDenied, psutil.Error, OSError):
+            command = ""
+        service = _service_from_process_text(f"{name} {executable} {command}")
+        display = name or Path(executable).name or f"PID {pid}"
+        return service, display
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.Error, OSError):
+        return None, None
+
+
 def _probe_endpoint(
     path: str, port: int, timeout: float, host: str = "127.0.0.1"
 ) -> tuple[Optional[int], str, bool]:
@@ -97,24 +145,47 @@ def probe_ai_service(
     port: int,
     timeout: float = PROBE_TIMEOUT_SECONDS,
     host: str = "127.0.0.1",
+    service: Optional[str] = None,
 ) -> tuple[bool, bool, Optional[str]]:
     """
     Actively probe a detected local AI server.
     Returns (unauthenticated_api, wildcard_cors, endpoint_path).
     """
-    for path in AI_SERVICE_ENDPOINTS.get(port, ["/"]):
+    paths = AI_SERVICE_ENDPOINTS.get(port)
+    if paths is None and service:
+        lowered = service.lower()
+        if "ollama" in lowered:
+            paths = ["/api/tags", "/api/version"]
+        elif "lm studio" in lowered:
+            paths = ["/v1/models", "/api/v0/models"]
+        elif any(name in lowered for name in ("llama.cpp", "vllm", "localai", "mlx-audio")):
+            paths = ["/v1/models", "/models", "/health"]
+    for path in paths or ["/"]:
         status, acao, looks_json = _probe_endpoint(path, port, timeout, host=host)
         if status == 200 and looks_json:
             return True, acao in ("*", PROBE_ORIGIN), path
     return False, False, None
 
 
-def _parse_windows_netstat(output: str) -> list[tuple[str, int, str]]:
+def _make_listener(
+    ip: str, port: int, pid: Optional[int], process_hint: Optional[str] = None
+) -> Optional[Listener]:
+    process_service, process_name = _process_identity(pid)
+    if process_hint:
+        process_service = process_service or _service_from_process_text(process_hint)
+        process_name = process_name or process_hint
+    service = AI_SERVICE_PORTS.get(port) or process_service
+    if service is None:
+        return None
+    return Listener(ip=ip, port=port, service=service, process=process_name, pid=pid)
+
+
+def _parse_windows_netstat(output: str) -> list[Listener]:
     """Parse `netstat -ano -p tcp` listener rows on Windows."""
-    listeners: list[tuple[str, int, str]] = []
-    seen: set[tuple[str, int]] = set()
+    listeners: list[Listener] = []
+    seen: set[tuple[str, int, int]] = set()
     for line in output.splitlines():
-        match = re.match(r"\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+\d+\s*$", line, re.IGNORECASE)
+        match = re.match(r"\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$", line, re.IGNORECASE)
         if not match:
             continue
         endpoint = match.group(1)
@@ -126,25 +197,29 @@ def _parse_windows_netstat(output: str) -> list[tuple[str, int, str]]:
             continue
         try:
             port = int(port_text)
+            pid = int(match.group(2))
         except ValueError:
             continue
-        if port in AI_SERVICE_PORTS and (address, port) not in seen:
-            seen.add((address, port))
-            listeners.append((address, port, AI_SERVICE_PORTS[port]))
+        listener = _make_listener(address, port, pid)
+        key = (address, port, pid)
+        if listener and key not in seen:
+            seen.add(key)
+            listeners.append(listener)
     return listeners
 
 
 def _collect_listeners(
     budget: Optional[ScanBudget] = None,
-) -> Optional[list[tuple[str, int, str]]]:
+) -> Optional[list[Listener]]:
     """Read listeners with psutil, then use the platform's standard fallback."""
-    listeners: list[tuple[str, int, str]] = []
+    listeners: list[Listener] = []
     try:
         for conn in psutil.net_connections(kind="inet"):
             if conn.status != psutil.CONN_LISTEN or not conn.laddr:
                 continue
-            if conn.laddr.port in AI_SERVICE_PORTS:
-                listeners.append((conn.laddr.ip, conn.laddr.port, AI_SERVICE_PORTS[conn.laddr.port]))
+            listener = _make_listener(conn.laddr.ip, conn.laddr.port, conn.pid)
+            if listener:
+                listeners.append(listener)
         return listeners
     except (psutil.AccessDenied, PermissionError, OSError):
         try:
@@ -171,16 +246,25 @@ def _collect_listeners(
                 text=True,
                 timeout=timeout,
             )
-            seen: set[tuple[str, int]] = set()
+            seen: set[tuple[str, int, Optional[int]]] = set()
             for line in proc.stdout.splitlines()[1:]:
                 m = re.search(r"(\S+):(\d+)\s+\(LISTEN\)", line)
                 if not m:
                     continue
-                ip, port_str = m.group(1), m.group(2)
-                port = int(port_str)
-                if port in AI_SERVICE_PORTS and (ip, port) not in seen:
-                    seen.add((ip, port))
-                    listeners.append((ip, port, AI_SERVICE_PORTS[port]))
+                ip, port_str = m.group(1).strip("[]"), m.group(2)
+                fields = line.split()
+                process_hint = fields[0] if fields else None
+                try:
+                    port = int(port_str)
+                    pid = int(fields[1])
+                except (IndexError, ValueError):
+                    pid = None
+                    port = int(port_str)
+                listener = _make_listener(ip, port, pid, process_hint=process_hint)
+                key = (ip, port, pid)
+                if listener and key not in seen:
+                    seen.add(key)
+                    listeners.append(listener)
             if proc.returncode != 0 and not listeners:
                 return None
         except Exception:
@@ -199,7 +283,7 @@ def audit_network_ports(
     report: ScanReport,
     probe: bool = True,
     timeout: float = PROBE_TIMEOUT_SECONDS,
-    listeners: Optional[list[tuple[str, int, str]]] = None,
+    listeners: Optional[list[tuple[str, int, str] | Listener]] = None,
     budget: Optional[ScanBudget] = None,
 ) -> None:
     """Checks if local AI runners are bound to 0.0.0.0 / wildcard interfaces and probes for open APIs."""
@@ -232,7 +316,14 @@ def audit_network_ports(
     exposed_ports_found = 0
     local_ports_found = 0
 
-    for ip, port, service in listeners:
+    for listener in listeners:
+        if isinstance(listener, Listener):
+            ip, port, service = listener.ip, listener.port, listener.service
+            process, pid = listener.process, listener.pid
+        else:
+            ip, port, service = listener
+            process, pid = None, None
+        process_evidence = f" Process: {process} (PID {pid})." if process else ""
         if budget:
             try:
                 budget.check_time()
@@ -259,6 +350,7 @@ def audit_network_ports(
                 description=(
                     f"Port {port} is bound to '{ip}', so the local AI server is reachable beyond loopback "
                     "by other devices on the bound network (and may be vulnerable to browser DNS rebinding)."
+                    + process_evidence
                 ),
                 remediation="Bind strictly to 127.0.0.1 or ::1 (e.g., export OLLAMA_HOST=127.0.0.1:11434).",
                 location=f"{ip}:{port}",
@@ -269,7 +361,7 @@ def audit_network_ports(
                 layer="Layer 4 (Network Exposure)",
                 severity=Severity.PASS,
                 title=f"{service} Bound Safely to Loopback ({ip}:{port})",
-                description=f"{service} is listening exclusively on localhost.",
+                description=f"{service} is listening exclusively on localhost.{process_evidence}",
                 location=f"{ip}:{port}",
             )
 
@@ -280,7 +372,9 @@ def audit_network_ports(
         probe_timeout = min(timeout, budget.remaining_seconds) if budget else timeout
         if probe_timeout <= 0:
             continue
-        unauth, cors_wildcard, path = probe_ai_service(port, timeout=probe_timeout, host=probe_host)
+        unauth, cors_wildcard, path = probe_ai_service(
+            port, timeout=probe_timeout, host=probe_host, service=service
+        )
         if not unauth:
             continue
         if not loopback:
@@ -295,6 +389,7 @@ def audit_network_ports(
                        "Any device on the network can query, load, or generate through this server. ")
                     + "This enables remote model theft, prompt injection against your agents, and RCE via "
                     "vulnerable runner parsers."
+                    + process_evidence
                 ),
                 remediation=(
                     "Restrict binding to 127.0.0.1 and/or require an API key "
@@ -323,6 +418,7 @@ def audit_network_ports(
                 description=(
                     f"GET {path} returned 200 without authentication. Normal for single-user local setups, "
                     "but any process running as your user can drive the model."
+                    + process_evidence
                 ),
                 location=f"{ip}:{port}",
             )
