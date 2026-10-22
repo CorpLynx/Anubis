@@ -7,5 +7,6 @@ dist/
 .venv/
 venv/
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
-localguard-ai.zip
+anubis.zip

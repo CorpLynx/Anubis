@@ -7,6 +7,7 @@ all network failures degrade to INFO findings, never crashes).
 
 import hashlib
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -14,9 +15,10 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
 
-from localguard.models import ScanReport, Severity
+from anubis.limits import ScanBudget, ScanLimitExceeded
+from anubis.models import ScanReport, Severity
 
-TRUSTED_ORGS = {
+RECOGNIZED_ORGS = {
     "mlx-community",
     "bartowski",
     "unsloth",
@@ -36,6 +38,7 @@ HIGH_RISK_KEYWORDS = {"obliterated", "abliterated", "uncensored", "jailbroken", 
 HF_API_BASE = "https://huggingface.co/api/models"
 HF_REPO_URL_RE = re.compile(r"huggingface\.co/([^/\s]+/[^/\s?#]+)")
 WEIGHT_SUFFIXES = {".gguf", ".safetensors", ".bin", ".pt", ".pth"}
+SNAPSHOT_REVISION_RE = re.compile(r"[0-9a-fA-F]{6,64}\Z")
 
 
 def _derive_repo_id(path: Path, gguf_metadata: dict[str, Any]) -> Optional[str]:
@@ -54,22 +57,102 @@ def _derive_repo_id(path: Path, gguf_metadata: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _get_json(url: str, timeout: float = 6.0) -> Any:
+def _get_json(url: str, timeout: float = 6.0, budget: Optional[ScanBudget] = None) -> Any:
     """Single seam for all Hub API GETs (monkeypatched in tests)."""
-    req = urllib.request.Request(url, headers={"User-Agent": "localguard-ai/0.1.0"})
+    if budget:
+        budget.check_time()
+        timeout = min(timeout, budget.remaining_seconds)
+    req = urllib.request.Request(url, headers={"User-Agent": "anubis-ai/0.1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        body = resp.read(32 * 1024 * 1024 + 1)
+    if len(body) > 32 * 1024 * 1024:
+        raise ValueError("Hugging Face API response exceeds 32 MiB safety limit")
+    if budget:
+        budget.consume_bytes(len(body))
+    return json.loads(body.decode("utf-8"))
 
 
-def _sha256_of(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str:
+def _sha256_of(
+    path: Path, chunk_size: int = 8 * 1024 * 1024, budget: Optional[ScanBudget] = None
+) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
+        file_size = path.stat().st_size
+        total = 0
         while True:
-            chunk = f.read(chunk_size)
+            read_size = min(chunk_size, file_size - total) if file_size >= total else chunk_size
+            if read_size <= 0:
+                break
+            if budget:
+                budget.check_bytes(read_size)
+            chunk = f.read(read_size)
             if not chunk:
                 break
+            if budget:
+                budget.consume_bytes(len(chunk))
             h.update(chunk)
+            total += len(chunk)
     return h.hexdigest()
+
+
+def _download_count(info: dict[str, Any]) -> int:
+    value = info.get("downloads")
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _select_local_snapshot(
+    path: Path, budget: Optional[ScanBudget] = None
+) -> tuple[Optional[Path], Optional[str], bool]:
+    """Returns a specific HF snapshot root/revision when the target is in a Hub cache."""
+    parts = path.parts
+    if "snapshots" in parts:
+        index = parts.index("snapshots")
+        if index + 1 < len(parts):
+            revision = parts[index + 1]
+            snapshot_root = path if path.is_dir() and path.name == revision else None
+            return snapshot_root, revision, False
+
+    if not path.is_dir() or not (path / "snapshots").is_dir():
+        return None, None, False
+
+    snapshots_root = path / "snapshots"
+    refs_main = path / "refs" / "main"
+    try:
+        ref_size = refs_main.stat().st_size
+        if ref_size > 256:
+            main_revision = ""
+        else:
+            if budget:
+                budget.consume_bytes(ref_size)
+            main_revision = refs_main.read_text(encoding="utf-8").strip()
+    except OSError:
+        main_revision = ""
+
+    if SNAPSHOT_REVISION_RE.fullmatch(main_revision):
+        selected = snapshots_root / main_revision
+        if selected.is_dir():
+            return selected, main_revision, False
+
+    snapshots: list[Path] = []
+    snapshot_limit = min(1000, budget.max_files if budget else 1000)
+    try:
+        with os.scandir(snapshots_root) as entries:
+            for entry in entries:
+                if budget:
+                    budget.check_time()
+                if len(snapshots) >= snapshot_limit:
+                    if budget:
+                        budget.note("snapshot revision index limit")
+                    return None, None, True
+                if entry.is_dir(follow_symlinks=False):
+                    snapshots.append(Path(entry.path))
+    except ScanLimitExceeded:
+        raise
+    except OSError:
+        return None, None, False
+    if len(snapshots) == 1:
+        return snapshots[0], snapshots[0].name, False
+    return None, None, len(snapshots) > 1
 
 
 def verify_upstream(
@@ -78,6 +161,8 @@ def verify_upstream(
     deep: bool = False,
     timeout: float = 6.0,
     gguf_metadata: Optional[dict[str, Any]] = None,
+    budget: Optional[ScanBudget] = None,
+    local_files: Optional[list[Path]] = None,
 ) -> None:
     """
     Online provenance check against the Hugging Face Hub API.
@@ -102,8 +187,20 @@ def verify_upstream(
         return
 
     try:
+        snapshot_root, snapshot_revision, ambiguous_snapshots = _select_local_snapshot(path, budget)
+    except ScanLimitExceeded as exc:
+        report.add(
+            layer="Scanner",
+            severity=Severity.INFO,
+            title="Snapshot Reference Check Reached Scan Budget",
+            description=f"Could not inspect the local Hugging Face refs ({exc}).",
+            location=str(path),
+        )
+        return
+
+    try:
         encoded_repo_id = quote(repo_id, safe="/")
-        info = _get_json(f"{HF_API_BASE}/{encoded_repo_id}", timeout=timeout)
+        info = _get_json(f"{HF_API_BASE}/{encoded_repo_id}", timeout=timeout, budget=budget)
     except urllib.error.HTTPError as exc:
         if exc.code in (401, 403, 404):
             report.add(
@@ -164,25 +261,29 @@ def verify_upstream(
             remediation="Do not grant this model autonomous shell or file-system tool access.",
             location=str(path),
         )
-    elif author in TRUSTED_ORGS:
-        downloads = int(info.get("downloads") or 0)
+    elif author in RECOGNIZED_ORGS:
+        downloads = _download_count(info)
         report.add(
             layer="Layer 5 (Upstream Verification)",
-            severity=Severity.PASS,
-            title=f"HF Hub Confirms Tier-1 Source ('{author}', {downloads:,} downloads/mo)",
-            description=f"Upstream repository '{repo_id}' exists and is owned by a verified organization.",
+            severity=Severity.INFO,
+            title=f"HF Hub Owner Matches Recognized Organization ('{author}')",
+            description=(
+                f"'{repo_id}' is listed under the recognized Hugging Face account '{author}' "
+                f"({downloads:,} downloads/mo). Account identity and popularity do not establish that "
+                "these local bytes are safe or unmodified; rely on the separate integrity result."
+            ),
             location=str(path),
         )
     else:
-        downloads = int(info.get("downloads") or 0)
+        downloads = _download_count(info)
         if downloads < 100:
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.MEDIUM,
                 title=f"Low-Adoption Unverified Upstream ('{repo_id}')",
                 description=(
-                    f"Repository exists but uploader '{author}' is not a Tier-1 organization and the repo "
-                    f"has only {downloads} monthly downloads — a common profile for clone/fake repos."
+                    f"Repository exists, but uploader '{author}' is not in the locally recognized organization "
+                    f"list and the repo has {downloads} monthly downloads. Anubis has not independently reviewed it."
                 ),
                 remediation="Cross-check the exact repo URL with the model's documentation before use.",
                 location=str(path),
@@ -192,7 +293,7 @@ def verify_upstream(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.INFO,
                 title=f"Upstream Exists but Uploader Unverified ('{author}')",
-                description=f"'{repo_id}' found on the Hub ({downloads} downloads/mo) but is not a Tier-1 org.",
+                description=f"'{repo_id}' is on the Hub ({downloads} downloads/mo), but its uploader is not in the locally recognized organization list.",
                 location=str(path),
             )
 
@@ -205,12 +306,26 @@ def verify_upstream(
             location=str(path),
         )
 
+    if ambiguous_snapshots:
+        report.add(
+            layer="Layer 5 (Upstream Verification)",
+            severity=Severity.INFO,
+            title="Multiple Cached Revisions Need Explicit Selection",
+            description=(
+                "This Hugging Face cache contains multiple snapshots and no usable refs/main pointer. "
+                "Scan a specific snapshots/<revision> directory to avoid comparing old weights with the latest tree."
+            ),
+            location=str(path),
+        )
+        return
+
     # Per-file integrity against the upstream tree (size now, SHA256 with deep=True)
     try:
-        revision = str(info.get("sha") or "main")
+        revision = snapshot_revision or str(info.get("sha") or "main")
         tree = _get_json(
             f"{HF_API_BASE}/{encoded_repo_id}/tree/{quote(revision, safe='')}?recursive=true",
             timeout=timeout,
+            budget=budget,
         )
     except Exception:
         report.add(
@@ -222,46 +337,104 @@ def verify_upstream(
         )
         return
 
+    remote_by_path: dict[str, dict[str, Any]] = {}
     remote_by_name: dict[str, list[dict[str, Any]]] = {}
     if isinstance(tree, list):
         for entry in tree:
             if isinstance(entry, dict) and entry.get("path"):
-                remote_by_name.setdefault(Path(str(entry["path"])).name, []).append(entry)
+                remote_path = Path(str(entry["path"])).as_posix()
+                remote_by_path[remote_path] = entry
+                remote_by_name.setdefault(Path(remote_path).name, []).append(entry)
 
-    if path.is_file():
-        local_weights = [path]
-    else:
+    if local_files is not None:
         local_weights = sorted(
-            p for p in path.rglob("*") if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file()
+            p for p in local_files if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file()
         )
+        if snapshot_root is not None:
+            local_weights = [p for p in local_weights if p == snapshot_root or snapshot_root in p.parents]
+    elif path.is_file():
+        local_weights = [path]
+    elif snapshot_root is not None:
+        local_weights = list((budget or ScanBudget()).walk_files(snapshot_root))
+        local_weights = [p for p in local_weights if p.suffix.lower() in WEIGHT_SUFFIXES]
+    else:
+        local_weights = list((budget or ScanBudget()).walk_files(path))
+        local_weights = [p for p in local_weights if p.suffix.lower() in WEIGHT_SUFFIXES]
+
+    if not local_weights:
+        report.add(
+            layer="Layer 5 (Upstream Verification)",
+            severity=Severity.INFO,
+            title="No Local Weight Files Available for Comparison",
+            description="No supported local weights were enumerated within the scan limits.",
+            location=str(path),
+        )
+        return
 
     size_verified = 0
     hash_verified = 0
     for local_file in local_weights:
-        entries = remote_by_name.get(local_file.name)
-        if not entries:
+        if budget and budget.stop_requested:
+            break
+        if path.is_file():
+            relative_path = local_file.name
+        elif snapshot_root is not None:
+            relative_path = local_file.relative_to(snapshot_root).as_posix()
+        else:
+            relative = local_file.relative_to(path)
+            parts = relative.parts
+            if "snapshots" in parts:
+                snapshot_index = parts.index("snapshots")
+                relative = Path(*parts[snapshot_index + 2 :])
+            relative_path = relative.as_posix()
+
+        entry = remote_by_path.get(relative_path)
+        if entry is None:
+            basename_matches = remote_by_name.get(local_file.name, [])
+            if len(basename_matches) == 1:
+                entry = basename_matches[0]
+        if entry is None:
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.MEDIUM,
                 title=f"Local Weight File Not Found Upstream ('{local_file.name}')",
                 description=(
-                    f"'{local_file.name}' has no counterpart in '{repo_id}'. The file may have been renamed, "
-                    "tampered with, or the repo identifier is spoofed."
+                    f"'{relative_path}' has no unambiguous counterpart in '{repo_id}'. The file may have been "
+                    "renamed, tampered with, or the repo identifier is spoofed."
                 ),
                 location=str(local_file),
             )
             continue
 
-        local_size = local_file.stat().st_size
-        size_match = next((e for e in entries if int(e.get("size") or 0) == local_size), None)
-        if size_match is None:
-            upstream_sizes = [int(e.get("size") or 0) for e in entries]
+        try:
+            local_size = local_file.stat().st_size
+        except OSError as exc:
+            report.add(
+                layer="Layer 5 (Upstream Verification)",
+                severity=Severity.INFO,
+                title=f"Local Weight File Changed During Verification ('{local_file.name}')",
+                description=f"Could not stat the local file ({exc.__class__.__name__}); comparison skipped.",
+                location=str(local_file),
+            )
+            continue
+
+        upstream_size = entry.get("size")
+        if not isinstance(upstream_size, int) or isinstance(upstream_size, bool) or upstream_size < 0:
+            report.add(
+                layer="Layer 5 (Upstream Verification)",
+                severity=Severity.INFO,
+                title=f"Invalid Upstream Size Metadata ('{local_file.name}')",
+                description="The Hub response did not contain a valid integer file size; comparison skipped.",
+                location=str(local_file),
+            )
+            continue
+        if upstream_size != local_size:
             report.add(
                 layer="Layer 5 (Upstream Verification)",
                 severity=Severity.HIGH,
                 title=f"File Size Differs from Upstream ('{local_file.name}')",
                 description=(
-                    f"Local copy is {local_size:,} bytes; upstream '{repo_id}' has {upstream_sizes} bytes. "
+                    f"Local copy is {local_size:,} bytes; upstream '{repo_id}' has {upstream_size:,} bytes. "
                     "The weights were modified after download."
                 ),
                 remediation="Re-download from the official repo or delete the file.",
@@ -269,12 +442,24 @@ def verify_upstream(
             )
             continue
 
-        lfs = size_match.get("lfs") or {}
+        lfs_value = entry.get("lfs")
+        lfs = lfs_value if isinstance(lfs_value, dict) else {}
         oid = str(lfs.get("oid") or "").lower()
         if oid.startswith("sha256:"):
             oid = oid.removeprefix("sha256:")
         if deep and oid:
-            if _sha256_of(local_file) == oid.lower():
+            try:
+                local_sha256 = _sha256_of(local_file, budget=budget)
+            except (OSError, ScanLimitExceeded) as exc:
+                report.add(
+                    layer="Layer 5 (Upstream Verification)",
+                    severity=Severity.INFO,
+                    title=f"Could Not Hash Local Weight File ('{local_file.name}')",
+                    description=f"Hash comparison stopped ({exc.__class__.__name__}: {exc}).",
+                    location=str(local_file),
+                )
+                continue
+            if local_sha256 == oid.lower():
                 hash_verified += 1
             else:
                 report.add(
@@ -336,19 +521,22 @@ def audit_model_provenance(path: Path, gguf_metadata: dict[str, Any], report: Sc
     if not detected_org and gguf_metadata:
         quant_by = str(gguf_metadata.get("general.quantized_by", "")).lower()
         repo_url = str(gguf_metadata.get("general.repo_url", "")).lower()
-        for org in TRUSTED_ORGS:
+        for org in RECOGNIZED_ORGS:
             if org in quant_by or f"/{org}/" in repo_url:
                 detected_org = org
                 break
 
     matched_risk_words = [kw for kw in HIGH_RISK_KEYWORDS if kw in model_name or kw in resolved.lower()]
 
-    if detected_org in TRUSTED_ORGS and not matched_risk_words:
+    if detected_org in RECOGNIZED_ORGS and not matched_risk_words:
         report.add(
             layer="Layer 5 (Provenance)",
-            severity=Severity.PASS,
-            title=f"Trusted Supply Chain Source ('{detected_org}')",
-            description=f"Model originates from verified organization/quantizer '{detected_org}'.",
+            severity=Severity.INFO,
+            title=f"Recognized Uploader Name Heuristic ('{detected_org}')",
+            description=(
+                f"The local path or embedded metadata names '{detected_org}'. This value is attacker-controlled "
+                "and is not proof of uploader identity, model integrity, or safety."
+            ),
             location=str(path),
         )
     elif matched_risk_words:
@@ -357,8 +545,8 @@ def audit_model_provenance(path: Path, gguf_metadata: dict[str, Any], report: Sc
             severity=Severity.MEDIUM,
             title=f"Uncensored / Modified Weights Heuristic ({', '.join(matched_risk_words)})",
             description=(
-                "Model name indicates post-training weight modification ('obliterated'/'uncensored'). "
-                "Community fine-tunes carry higher risk of embedded fine-tuning backdoors."
+                "The model name contains a modification-related keyword. Names are user-controlled and this "
+                "heuristic does not establish what training or weight changes were made."
             ),
             remediation="Do not grant this model autonomous shell or file-system tool access.",
             location=str(path),
@@ -368,7 +556,7 @@ def audit_model_provenance(path: Path, gguf_metadata: dict[str, Any], report: Sc
             layer="Layer 5 (Provenance)",
             severity=Severity.INFO,
             title="Unverified Local Model Provenance",
-            description="Could not automatically link file to a Tier-1 Hugging Face organization.",
+            description="Could not match a recognized uploader name; origin and integrity remain unverified.",
             remediation="Verify the SHA256 hash against the official Hugging Face repository before granting tool access.",
             location=str(path),
         )

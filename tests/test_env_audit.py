@@ -5,8 +5,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from localguard.inspectors.env_audit import audit_network_ports, probe_ai_service
-from localguard.models import ScanReport, Severity
+from anubis.inspectors.env_audit import audit_network_ports, probe_ai_service
+from anubis.models import ScanReport, Severity
 
 
 class _OpenHandler(BaseHTTPRequestHandler):

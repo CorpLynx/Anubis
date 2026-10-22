@@ -1,0 +1,36 @@
+name: Refresh Ollama OSV advisory snapshot
+
+on:
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Anubis
+        run: pip install -e .
+      - name: Fetch and normalize OSV data
+        run: python scripts/update_ollama_advisories.py
+      - name: Open reviewable update PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Refresh Ollama OSV advisory snapshot"
+          branch: automation/ollama-osv-snapshot
+          delete-branch: true
+          title: "Refresh Ollama OSV advisory snapshot"
+          body: |
+            Automated snapshot update from OSV.dev for `github.com/ollama/ollama`.
+
+            Review affected version ranges and severity before merging. New or changed advisories are
+            marked `needs_review` and report informationally until curated.
+          add-paths: src/anubis/ollama_advisories.json

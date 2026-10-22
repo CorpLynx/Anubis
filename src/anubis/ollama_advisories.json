@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-22",
+  "source": "https://api.osv.dev/v1/query",
+  "package": {
+    "ecosystem": "Go",
+    "name": "github.com/ollama/ollama"
+  },
+  "advisories": [
+    {"id":"GHSA-5jx5-hqx5-2vrj","aliases":["CVE-2024-28224","GO-2024-2699"],"summary":"Ollama DNS rebinding vulnerability","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.1.29"}]]},
+    {"id":"GHSA-8hqg-whrw-pv92","aliases":["CVE-2024-37032","GO-2024-2901"],"summary":"Ollama does not validate the format of the digest (sha256 with 64 hex digits)","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.1.34"}]]},
+    {"id":"GHSA-93jv-pvg8-hf3v","aliases":["CVE-2025-44779","GO-2025-3851"],"summary":"Ollama allows deletion of arbitrary files","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.1.34"}]]},
+    {"id":"GHSA-95j2-w8x7-hm88","aliases":["CVE-2024-39720","GO-2024-3245"],"summary":"Ollama Out-of-bounds Read","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.1.46"}]]},
+    {"id":"GHSA-846m-99qv-67mg","aliases":["CVE-2024-45436","GO-2024-3104"],"summary":"Ollama can extract members of a ZIP archive outside of the parent directory","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.1.47"}]]},
+    {"id":"GHSA-2xf2-gjm6-g2c6","aliases":["CVE-2024-8063","GO-2025-3689"],"summary":"Ollama Divide by Zero Vulnerability","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.3"}]]},
+    {"id":"GHSA-89qx-m49c-8crf","aliases":["CVE-2024-12055","GO-2025-3558"],"summary":"Ollama Allows Out-of-Bounds Read","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.14"}]]},
+    {"id":"GHSA-9gcr-28rp-cc24","aliases":["CVE-2025-0317","GO-2025-3559"],"summary":"Ollama Divide By Zero vulnerability","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.14"}]]},
+    {"id":"GHSA-fccc-8m69-8r78","aliases":["CVE-2025-0315","GO-2025-3557"],"summary":"Ollama Allocation of Resources Without Limits or Throttling vulnerability","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.14"}]]},
+    {"id":"GHSA-p2wh-w96x-w232","aliases":["CVE-2025-0312","GO-2025-3582"],"summary":"Ollama Denial of Service (DoS) via Null Pointer Dereference","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.14"}]]},
+    {"id":"GHSA-v464-r2r9-www7","aliases":["CVE-2024-12886","GO-2025-3548"],"summary":"Ollama Vulnerable to Denial of Service (DoS) via Crafted GZIP","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.3.14"}]]},
+    {"id":"GHSA-wrh5-cmwx-q2qr","aliases":["CVE-2025-1975","GO-2025-3695"],"summary":"Ollama Server Vulnerable to Denial of Service (DoS) Attack","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.5.11"}]]},
+    {"id":"GHSA-x9hg-5q6g-q3jr","aliases":["CVE-2025-51471","GO-2025-3824"],"summary":"Ollama vulnerable to Cross-Domain Token Exposure","severity":"MEDIUM","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.9.6"}]]},
+    {"id":"GHSA-f6mr-38g8-39rg","aliases":["CVE-2025-63389","GO-2025-4251"],"summary":"Ollama Platform has missing authentication enabling attackers to perform model management operations","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.13.5"}]]},
+    {"id":"GHSA-x8qc-fggm-mpqg","aliases":["CVE-2026-7482","GO-2026-5748"],"summary":"Ollama contains a heap out-of-bounds read vulnerability in the GGUF model loader","severity":"CRITICAL","needs_review":false,"ranges":[[{"introduced":"0"},{"fixed":"0.17.1"}]]},
+    {"id":"GHSA-x99g-8v8j-25j2","aliases":["CVE-2026-7020","GO-2026-5750"],"summary":"Ollama is Vulnerable to Path Traversal","severity":"HIGH","needs_review":false,"ranges":[[{"introduced":"0"},{"last_affected":"0.20.2"}]]}
+  ]
+}
