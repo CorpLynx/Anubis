@@ -6,6 +6,7 @@ import ipaddress
 import json
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from datetime import date
@@ -108,8 +109,35 @@ def probe_ai_service(
     return False, False, None
 
 
-def _collect_listeners(budget: Optional[ScanBudget] = None) -> list[tuple[str, int, str]]:
-    """Returns [(ip, port, service)] for AI ports found LISTEN-ing, via psutil with lsof fallback."""
+def _parse_windows_netstat(output: str) -> list[tuple[str, int, str]]:
+    """Parse `netstat -ano -p tcp` listener rows on Windows."""
+    listeners: list[tuple[str, int, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for line in output.splitlines():
+        match = re.match(r"\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+\d+\s*$", line, re.IGNORECASE)
+        if not match:
+            continue
+        endpoint = match.group(1)
+        if endpoint.startswith("[") and "]:" in endpoint:
+            address, port_text = endpoint[1:].rsplit("]:", 1)
+        elif ":" in endpoint:
+            address, port_text = endpoint.rsplit(":", 1)
+        else:
+            continue
+        try:
+            port = int(port_text)
+        except ValueError:
+            continue
+        if port in AI_SERVICE_PORTS and (address, port) not in seen:
+            seen.add((address, port))
+            listeners.append((address, port, AI_SERVICE_PORTS[port]))
+    return listeners
+
+
+def _collect_listeners(
+    budget: Optional[ScanBudget] = None,
+) -> Optional[list[tuple[str, int, str]]]:
+    """Read listeners with psutil, then use the platform's standard fallback."""
     listeners: list[tuple[str, int, str]] = []
     try:
         for conn in psutil.net_connections(kind="inet"):
@@ -117,14 +145,26 @@ def _collect_listeners(budget: Optional[ScanBudget] = None) -> list[tuple[str, i
                 continue
             if conn.laddr.port in AI_SERVICE_PORTS:
                 listeners.append((conn.laddr.ip, conn.laddr.port, AI_SERVICE_PORTS[conn.laddr.port]))
+        return listeners
     except (psutil.AccessDenied, PermissionError, OSError):
-        # macOS fallback using `lsof` for current user processes without sudo
         try:
             timeout = min(3.0, budget.remaining_seconds) if budget else 3.0
             if timeout <= 0:
                 if budget:
                     budget.note("time limit")
-                return listeners
+                return None
+            if sys.platform == "win32":
+                proc = subprocess.run(
+                    ["netstat", "-ano", "-p", "tcp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                )
+                if proc.returncode != 0:
+                    return None
+                return _parse_windows_netstat(proc.stdout)
+
+            # macOS fallback for the current user when psutil access is restricted.
             proc = subprocess.run(
                 ["lsof", "-iTCP", "-sTCP:LISTEN", "-P", "-n"],
                 capture_output=True,
@@ -141,8 +181,10 @@ def _collect_listeners(budget: Optional[ScanBudget] = None) -> list[tuple[str, i
                 if port in AI_SERVICE_PORTS and (ip, port) not in seen:
                     seen.add((ip, port))
                     listeners.append((ip, port, AI_SERVICE_PORTS[port]))
+            if proc.returncode != 0 and not listeners:
+                return None
         except Exception:
-            pass
+            return None
     return listeners
 
 
@@ -174,6 +216,18 @@ def audit_network_ports(
             return
     if listeners is None:
         listeners = _collect_listeners(budget=budget)
+        if listeners is None:
+            report.add(
+                layer="Layer 4 (Network Exposure)",
+                severity=Severity.INFO,
+                title="Network Socket Table Unavailable",
+                description=(
+                    "Anubis could not inspect listening sockets with psutil or the platform fallback; "
+                    "no clean network result is claimed."
+                ),
+                remediation="Run with appropriate local permissions and review the known AI service ports manually.",
+            )
+            return
 
     exposed_ports_found = 0
     local_ports_found = 0

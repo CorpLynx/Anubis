@@ -7,7 +7,7 @@ Offline-first security scanner for local AI model files and runtimes. It statica
 - **Binary integrity:** GGUF tensor bounds, quantization block alignment, and overlapping spans; Safetensors header limits, tensor shape/byte consistency, offsets, overlap, and unclaimed data regions.
 - **Model directory hygiene:** legacy pickle weights, `auto_map`/`trust_remote_code` indicators, suspicious Python imports/calls, and embedded tokenizer/chat templates.
 - **Chat templates:** Jinja2 AST sandbox-escape patterns, content-conditional triggers, URLs/IP addresses, and Base64-encoded URLs or high-entropy blobs.
-- **Local services:** known AI ports (`11434`, `1234`, `8000`, `8080`), any non-loopback binding, and bounded unauthenticated API/CORS probes. The probes only issue local GET requests and do not follow redirects.
+- **Local services:** known AI ports (`11434`, `1234`, `8000`, `8080`), non-loopback bindings, and bounded unauthenticated API/CORS probes. It uses psutil with `lsof`/`netstat` fallbacks; probes issue local GET requests and do not follow redirects.
 - **Runner advisories:** Ollama versions matched against a dated, curated OSV snapshot; unmatched versions are explicitly not considered vulnerability-free.
 - **Workspace and provenance:** likely secrets in agent workspaces, non-authoritative uploader/name heuristics, plus optional Hugging Face repository and file-integrity checks.
 

@@ -1,6 +1,7 @@
 """Tests for traversal, byte, time, and symlink scan budgets."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,14 @@ def test_max_depth_does_not_descend_and_reports_skipped_directory(tmp_path: Path
 
     assert list(budget.walk_files(tmp_path)) == []
     assert "directory-depth limit" in budget.reasons
+
+
+def test_zero_inode_fallback_uses_distinct_normalized_paths(tmp_path: Path) -> None:
+    stat_without_inode = SimpleNamespace(st_dev=0, st_ino=0)
+    first = ScanBudget._directory_identity(tmp_path / "one", stat_without_inode)
+    second = ScanBudget._directory_identity(tmp_path / "two", stat_without_inode)
+
+    assert first != second
 
 
 def test_byte_budget_raises_before_exceeding_limit() -> None:

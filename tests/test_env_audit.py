@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from anubis.inspectors.env_audit import audit_network_ports, probe_ai_service
+from anubis.inspectors.env_audit import _parse_windows_netstat, audit_network_ports, probe_ai_service
 from anubis.models import ScanReport, Severity
 
 
@@ -121,6 +121,21 @@ def test_no_listeners_reports_pass() -> None:
     report = ScanReport(target="t")
     audit_network_ports(report, listeners=[])
     assert report.findings[0].severity == Severity.PASS
+
+
+def test_windows_netstat_fallback_parses_ipv4_and_ipv6_listeners() -> None:
+    output = (
+        "Proto Local Address          Foreign Address        State           PID\n"
+        "TCP   0.0.0.0:11434          0.0.0.0:0              LISTENING       1234\n"
+        "TCP   [::]:1234              [::]:0                 LISTENING       5678\n"
+        "TCP   127.0.0.1:8000         127.0.0.1:0            ESTABLISHED     1111\n"
+    )
+
+    listeners = _parse_windows_netstat(output)
+
+    assert ("0.0.0.0", 11434, "Ollama API") in listeners
+    assert ("::", 1234, "LM Studio Server") in listeners
+    assert not any(port == 8000 for _, port, _ in listeners)
 
 
 def test_specific_non_loopback_binding_is_not_reported_safe() -> None:

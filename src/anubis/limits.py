@@ -85,10 +85,21 @@ class ScanBudget:
     @staticmethod
     def _is_within(path: Path, root: Path) -> bool:
         try:
-            path.relative_to(root)
-            return True
-        except ValueError:
+            root_norm = os.path.normcase(os.path.abspath(os.fspath(root)))
+            path_norm = os.path.normcase(os.path.abspath(os.fspath(path)))
+            return os.path.commonpath((root_norm, path_norm)) == root_norm
+        except (OSError, ValueError):
             return False
+
+    @staticmethod
+    def _directory_identity(path: Path, stat_result: os.stat_result) -> tuple[str, str | int, int | None]:
+        inode = getattr(stat_result, "st_ino", 0)
+        if inode:
+            return "inode", stat_result.st_dev, inode
+        # Some Windows filesystems return zero for st_ino. A normalized canonical
+        # path still detects cycles without collapsing every directory together.
+        canonical = os.path.normcase(os.path.abspath(os.fspath(path.resolve(strict=False))))
+        return "path", canonical, None
 
     def walk_files(
         self,
@@ -140,7 +151,7 @@ class ScanBudget:
         omitted = DEFAULT_SKIP_DIRS if skip_dirs is None else skip_dirs
         try:
             root_stat = resolved_root.stat()
-            visited_dirs = {(root_stat.st_dev, root_stat.st_ino)}
+            visited_dirs = {self._directory_identity(resolved_root, root_stat)}
         except OSError:
             visited_dirs = set()
         stack: list[tuple[Path, int]] = [(resolved_root, 0)]
@@ -209,7 +220,7 @@ class ScanBudget:
                                     self.reasons.add("directory-depth limit")
                                     self.skipped_paths += 1
                                     continue
-                                identity = (entry_stat.st_dev, entry_stat.st_ino)
+                                identity = self._directory_identity(Path(entry.path), entry_stat)
                                 if identity in visited_dirs:
                                     self.skipped_symlinks += 1
                                     continue
