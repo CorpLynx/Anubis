@@ -36,8 +36,8 @@ def _finding_to_dict(finding: Finding) -> dict[str, Any]:
     }
 
 
-def report_to_dict(report: ScanReport) -> dict[str, Any]:
-    return {
+def report_to_dict(report: ScanReport, *, include_prompt_text: bool = False) -> dict[str, Any]:
+    payload = {
         "schema_version": JSON_SCHEMA_VERSION,
         "tool": {"name": "Anubis", "version": "0.1.0"},
         "target": report.target,
@@ -50,10 +50,17 @@ def report_to_dict(report: ScanReport) -> dict[str, Any]:
         "confidence_note": "Confidence values are rule-class estimates, not calibrated probabilities.",
         "findings": [_finding_to_dict(finding) for finding in report.findings],
     }
+    if include_prompt_text:
+        payload["prompt_texts"] = report.prompt_texts
+    return payload
 
 
-def report_to_json(report: ScanReport, *, pretty: bool = True) -> str:
-    return json.dumps(report_to_dict(report), indent=2 if pretty else None, ensure_ascii=True)
+def report_to_json(report: ScanReport, *, pretty: bool = True, include_prompt_text: bool = False) -> str:
+    return json.dumps(
+        report_to_dict(report, include_prompt_text=include_prompt_text),
+        indent=2 if pretty else None,
+        ensure_ascii=True,
+    )
 
 
 def _sarif_file_location(location: str | None) -> dict[str, Any] | None:

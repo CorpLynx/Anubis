@@ -9,6 +9,8 @@ from typing import Any
 from anubis.inspectors.env_audit import audit_workspace_secrets
 from anubis.inspectors.gguf_inspector import verify_gguf_file
 from anubis.inspectors.jinja_ast import audit_jinja_template
+from anubis.inspectors.ollama_models import audit_go_template
+from anubis.inspectors.prompt_text import TextSegment, audit_prompt_text
 from anubis.inspectors.safetensors_mlx import audit_python_file_ast, verify_safetensors_file
 from anubis.models import ScanReport, Severity
 
@@ -57,6 +59,10 @@ def run_security_corpus(manifest_path: Path) -> dict[str, Any]:
             report = ScanReport(target=f"corpus:{case_id}")
             if kind == "jinja":
                 audit_jinja_template(case["template"], case_id, report)
+            elif kind == "go_template":
+                audit_go_template(case["template"], case_id, report)
+            elif kind == "prompt_text":
+                audit_prompt_text([TextSegment(case["text"])], case_id, report, subject="System Prompt")
             elif kind == "python":
                 source = root / f"{case_id}.py"
                 source.write_text(case["source"], encoding="utf-8")

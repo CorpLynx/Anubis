@@ -1,12 +1,14 @@
 # Anubis (`anubis`)
 
-Offline-first security scanner for local AI model files and runtimes. It statically inspects **GGUF**, **Safetensors**, MLX/Hugging Face model directories, chat templates, local AI server bindings, and agent workspaces without loading model tensors.
+Offline-first security scanner for local AI model files and runtimes. It statically inspects **GGUF**, **Safetensors**, MLX/Hugging Face model directories, Ollama model stores, chat templates, local AI server bindings, and agent workspaces without loading model tensors.
 
 ## What it checks
 
 - **Binary integrity:** GGUF tensor bounds, quantization block alignment, and overlapping spans; Safetensors header limits, tensor shape/byte consistency, offsets, overlap, and unclaimed data regions.
 - **Model directory hygiene:** legacy pickle weights, `auto_map`/`trust_remote_code` indicators, suspicious Python imports/calls, and embedded tokenizer/chat templates.
-- **Chat templates:** Jinja2 AST sandbox-escape patterns, content-conditional triggers, URLs/IP addresses, and Base64-encoded URLs or high-entropy blobs.
+- **Chat templates:** Jinja2 AST sandbox-escape patterns (including `|attr()` and string-built names), message-content triggers tracked through variables, namespaces, and macros, URLs/IP addresses, and Base64-encoded URLs or high-entropy blobs.
+- **Prompt text:** every literal string a template injects, plus Ollama `SYSTEM` prompts and seeded messages, is checked for instruction overrides, credential harvesting, data exfiltration, harmful-action steering, guardrail removal, deception, self-concealment, and invisible Unicode smuggling. These are phrase heuristics; hardcoded prose is also surfaced as an INFO finding for manual review.
+- **Ollama models:** manifests resolved to blobs; GGUF weights, Go `TEMPLATE`s, `SYSTEM` prompts, and `MESSAGES` layers are audited.
 - **Local services:** known AI ports plus process-signature discovery for common runners on custom ports, including process/PID context, non-loopback bindings, and bounded unauthenticated API/CORS probes. It uses psutil with `lsof` (macOS) and `netstat` (Windows) fallbacks; probes issue local GET requests and do not follow redirects.
 - **Runner advisories:** Ollama versions matched against a dated, curated OSV snapshot; unmatched versions are explicitly not considered vulnerability-free.
 - **Threat corpus:** a small labeled benign/malicious regression corpus reports per-class true/false positives and negatives.
@@ -42,6 +44,9 @@ pip install -e '.[dev]'
 # Offline scan of one model file or a Hugging Face/MLX directory
 anubis scan ~/.cache/huggingface/hub/models--mlx-community--some-model
 
+# Scan every locally pulled Ollama model (or one manifest under models/manifests/)
+anubis scan ~/.ollama/models
+
 # Fail with exit code 1 if HIGH or CRITICAL findings appear
 anubis scan model.gguf --strict
 
@@ -73,6 +78,12 @@ anubis audit --workspace . --max-files 5000 --max-depth 32 --max-bytes 107374182
 # Ask a separate local Ollama model for unverified regression-test ideas
 anubis scan model.gguf --format json > scan-report.json
 anubis redteam scan-report.json --model qwen2.5:14b
+
+# Have a model judge extracted prompt text for paraphrased harmful instructions
+anubis scan ~/.ollama/models --format json --include-prompt-text > prompts.json
+anubis redteam prompts.json --judge --model qwen3:8b                                  # local Ollama
+anubis redteam prompts.json --judge --provider openai --model qwen3-8b                # LM Studio / llama.cpp / vLLM
+anubis redteam prompts.json --judge --provider anthropic --allow-remote --fail-on-verdict suspicious
 ```
 
 `--deep` implies the online check. Online checks are opt-in; offline scans do not contact Hugging Face. Hash checking only succeeds when the Hub exposes an LFS SHA256 OID for the corresponding file.
@@ -98,6 +109,14 @@ Run the labeled sample corpus with `python scripts/benchmark_security_corpus.py`
 ### Optional local red-team advisor
 
 `anubis redteam` sends a minimized JSON scan summary to an already-installed Ollama model at loopback by default. It does **not** load the scanned model, execute returned ideas, change findings/severity, or claim the target is safe. The output is unverified test hypotheses; review and validate them in a disposable environment. Remote endpoints require the explicit `--allow-remote` flag and receive the minimized report.
+
+### Optional prompt-text judge
+
+Phrase rules miss paraphrased instructions, so `anubis redteam --judge` asks a model to read the text itself. `anubis scan --format json --include-prompt-text` adds each chat template, Ollama template, `SYSTEM` prompt, and seeded-message set (up to 64K characters each, plus the literal passages the static analyzer decoded) to the report; this is opt-in because system prompts can be private. The judge receives only that text and its type, never file paths or the rest of the report, and returns a separate JSON file of `UNVERIFIED_AI_JUDGMENT` verdicts (`benign`, `suspicious`, `malicious`) with categories and quoted evidence. Each quote is checked against the source text (`quote_verified`).
+
+- **Providers:** `ollama` (default, `http://127.0.0.1:11434`), `openai` for any OpenAI-compatible server (default `http://127.0.0.1:1234`; sends `OPENAI_API_KEY` as a bearer token when set), and `anthropic` (defaults to `claude-opus-5-5`; install with `pip install 'anubis-ai[judge]'`, credentials from `ANTHROPIC_API_KEY` or `ant auth login`). Non-loopback endpoints and the Anthropic API require `--allow-remote`.
+- **Injection handling:** judged text is wrapped in random-id delimiters and treated strictly as data; text that tries to influence the judge is classified as `judge_manipulation`. Output is schema-constrained and validated. A model that declines to judge (for example, a safety refusal) is recorded as `JUDGE_DECLINED`, never as benign.
+- **Cost and CI:** identical texts are judged once, long texts are chunked (the worst verdict wins), and `--max-requests` (default 50) bounds spend. `--fail-on-verdict suspicious|malicious` exits 1 for CI. Verdicts never change scan findings, severities, or the scan's exit status, and a `benign` verdict is not proof of safety.
 
 ## Development
 

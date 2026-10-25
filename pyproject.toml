@@ -27,6 +27,9 @@ dev = [
 fuzz = [
     "atheris>=2.3.0; platform_system == 'Linux'",
 ]
+judge = [
+    "anthropic>=2.3.0",
+]
 
 [project.scripts]
 anubis = "anubis.cli:app"
