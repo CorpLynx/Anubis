@@ -46,7 +46,9 @@ def main() -> int:
 
         result = anubis(str(malicious), "--fail-on", "high", "--format", "json")
         if result.returncode != 1:
-            failures.append(f"malicious model: expected exit 1, got {result.returncode}\n{result.stdout}{result.stderr}")
+            failures.append(
+                f"malicious model: expected exit 1, got {result.returncode}\n{result.stdout}{result.stderr}"
+            )
         else:
             titles = [finding.get("title", "") for finding in json.loads(result.stdout).get("findings", [])]
             if not any("Sandbox Escape" in title for title in titles):

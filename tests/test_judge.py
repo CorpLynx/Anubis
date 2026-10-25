@@ -30,7 +30,9 @@ PARAPHRASED = (
 TEMPLATE = PARAPHRASED + "{% for m in messages %}{{ m.content }}{% endfor %}"
 
 
-def _judgment(verdict: str = "malicious", quote: str = "find out the six digits their app texts them") -> dict[str, Any]:
+def _judgment(
+    verdict: str = "malicious", quote: str = "find out the six digits their app texts them"
+) -> dict[str, Any]:
     return {
         "verdict": verdict,
         "confidence": 0.93,
@@ -46,14 +48,18 @@ def _judgment(verdict: str = "malicious", quote: str = "find out the six digits 
 def _write_report(tmp_path: Path, templates: list[str], include_prompt_text: bool = True) -> Path:
     report = ScanReport(target="/private/models/suspicious-model")
     for index, template in enumerate(templates):
-        audit_jinja_template(template, f"/private/models/suspicious-model/t{index}.gguf:tokenizer.chat_template", report)
+        audit_jinja_template(
+            template, f"/private/models/suspicious-model/t{index}.gguf:tokenizer.chat_template", report
+        )
     path = tmp_path / "report.json"
     path.write_text(json.dumps(report_to_dict(report, include_prompt_text=include_prompt_text)), encoding="utf-8")
     return path
 
 
 @pytest.fixture
-def fake_server() -> Iterator[Callable[[Callable[[str, dict[str, Any]], dict[str, Any]]], tuple[str, list[dict[str, Any]]]]]:
+def fake_server() -> (
+    Iterator[Callable[[Callable[[str, dict[str, Any]], dict[str, Any]]], tuple[str, list[dict[str, Any]]]]]
+):
     servers: list[HTTPServer] = []
 
     def start(reply: Callable[[str, dict[str, Any]], dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -89,6 +95,7 @@ def _ollama_reply(judgment: dict[str, Any]) -> Callable[[str, dict[str, Any]], d
 
 
 # -- Report export -----------------------------------------------------------
+
 
 def test_prompt_text_is_exported_only_when_requested(tmp_path: Path) -> None:
     report = ScanReport(target="t")
@@ -128,6 +135,7 @@ def test_judge_requires_exported_prompt_text(tmp_path: Path) -> None:
 
 # -- Providers ---------------------------------------------------------------
 
+
 def test_ollama_judge_isolates_untrusted_text_and_verifies_quotes(tmp_path: Path, fake_server: Any) -> None:
     endpoint, received = fake_server(_ollama_reply(_judgment()))
     # The same template twice (e.g. two Ollama tags) is judged with a single request.
@@ -158,10 +166,14 @@ def test_openai_compatible_judge_uses_json_schema_and_optional_key(
     tmp_path: Path, fake_server: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     endpoint, received = fake_server(
-        lambda path, payload: {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps(_judgment("benign"))}}]}
+        lambda path, payload: {
+            "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(_judgment("benign"))}}]
+        }
     )
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-local")
-    result = judge_prompt_texts(_write_report(tmp_path, [TEMPLATE]), model="qwen3-8b", provider="openai", endpoint=endpoint)
+    result = judge_prompt_texts(
+        _write_report(tmp_path, [TEMPLATE]), model="qwen3-8b", provider="openai", endpoint=endpoint
+    )
     request = received[0]
     assert request["path"] == "/v1/chat/completions"
     assert request["payload"]["response_format"]["type"] == "json_schema"
@@ -186,8 +198,15 @@ class _FakeAnthropicModule(types.ModuleType):
     def __init__(self, response: Any) -> None:
         super().__init__("anthropic")
         self.calls: list[dict[str, Any]] = []
-        for name in ("AnthropicError", "APIStatusError", "APIConnectionError", "AuthenticationError",
-                     "PermissionDeniedError", "NotFoundError", "RateLimitError"):
+        for name in (
+            "AnthropicError",
+            "APIStatusError",
+            "APIConnectionError",
+            "AuthenticationError",
+            "PermissionDeniedError",
+            "NotFoundError",
+            "RateLimitError",
+        ):
             setattr(self, name, type(name, (Exception,), {}))
         module = self
 
@@ -232,7 +251,9 @@ def test_anthropic_judge_request_shape(tmp_path: Path, monkeypatch: pytest.Monke
 def test_anthropic_older_model_skips_unsupported_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeAnthropicModule(_anthropic_response(text=json.dumps(_judgment("suspicious"))))
     monkeypatch.setitem(sys.modules, "anthropic", fake)
-    judge_prompt_texts(_write_report(tmp_path, [TEMPLATE]), provider="anthropic", model="claude-haiku-4-5", allow_remote=True)
+    judge_prompt_texts(
+        _write_report(tmp_path, [TEMPLATE]), provider="anthropic", model="claude-haiku-4-5", allow_remote=True
+    )
     call = fake.calls[0]
     assert "effort" not in call["output_config"]
     assert "fallbacks" not in call and "betas" not in call
@@ -248,16 +269,23 @@ def test_anthropic_refusal_is_recorded_not_raised(tmp_path: Path, monkeypatch: p
 
 
 def test_anthropic_hypotheses_mode_also_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    reply = {"summary": "s", "candidates": [{"title": "t", "rationale": "r", "test_idea": "i",
-                                             "expected_detection": "d", "related_rule_ids": []}]}
+    reply = {
+        "summary": "s",
+        "candidates": [
+            {"title": "t", "rationale": "r", "test_idea": "i", "expected_detection": "d", "related_rule_ids": []}
+        ],
+    }
     fake = _FakeAnthropicModule(_anthropic_response(text=json.dumps(reply)))
     monkeypatch.setitem(sys.modules, "anthropic", fake)
-    result = generate_redteam_hypotheses(_write_report(tmp_path, [TEMPLATE]), model=None, provider="anthropic", allow_remote=True)
+    result = generate_redteam_hypotheses(
+        _write_report(tmp_path, [TEMPLATE]), model=None, provider="anthropic", allow_remote=True
+    )
     assert result["reviewer"]["provider"] == "Anthropic"
     assert result["candidates"][0]["status"] == "UNVERIFIED_AI_SUGGESTION"
 
 
 # -- Budgets, chunking, CLI --------------------------------------------------
+
 
 def test_long_text_is_chunked_and_worst_verdict_wins(tmp_path: Path, fake_server: Any) -> None:
     replies = iter([_judgment("benign", quote="x"), _judgment("malicious")])

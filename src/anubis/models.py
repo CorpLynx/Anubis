@@ -4,7 +4,6 @@ import hashlib
 import re
 from typing import Optional
 
-
 MAX_RECORDED_PROMPT_CHARS = 64_000
 MAX_RECORDED_PASSAGE_CHARS = 8_000
 
@@ -109,9 +108,7 @@ class ScanReport:
         confidence: Optional[float] = None,
         evidence: Optional[str] = None,
     ) -> None:
-        resolved_confidence = (
-            default_confidence(layer, severity, title) if confidence is None else confidence
-        )
+        resolved_confidence = default_confidence(layer, severity, title) if confidence is None else confidence
         if not 0.0 <= resolved_confidence <= 1.0:
             raise ValueError("Finding confidence must be between 0 and 1")
         self.findings.append(

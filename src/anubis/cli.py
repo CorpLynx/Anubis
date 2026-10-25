@@ -75,10 +75,7 @@ SEVERITY_COLORS: dict[Severity, str] = {
 
 
 def _safe_rich_text(value: str) -> str:
-    clean = "".join(
-        char if char in "\n\t" or char.isprintable() else f"\\u{ord(char):04x}"
-        for char in value
-    )
+    clean = "".join(char if char in "\n\t" or char.isprintable() else f"\\u{ord(char):04x}" for char in value)
     return escape(clean)
 
 
@@ -100,8 +97,10 @@ def _render_report(
         Panel.fit(
             (
                 "[bold red]Anubis Scan INCOMPLETE[/bold red]"
-                if not report.complete else "[bold cyan]Anubis Security Audit[/bold cyan]"
-            ) + f"\nTarget: [white]{_safe_rich_text(report.target)}[/white]",
+                if not report.complete
+                else "[bold cyan]Anubis Security Audit[/bold cyan]"
+            )
+            + f"\nTarget: [white]{_safe_rich_text(report.target)}[/white]",
             border_style="red" if not report.complete else "cyan",
         )
     )
@@ -250,19 +249,43 @@ def _check_prompt_text_format(include_prompt_text: bool, output_format: OutputFo
 
 @app.command("scan")
 def scan_command(
-    path: Path = typer.Argument(..., exists=True, help="Path to a .gguf file, .safetensors file, MLX/HF directory, or Ollama model store/manifest."),
+    path: Path = typer.Argument(
+        ...,
+        exists=True,
+        help="Path to a .gguf file, .safetensors file, MLX/HF directory, or Ollama model store/manifest.",
+    ),
     fail_on_high: bool = typer.Option(False, "--strict", help="Exit 1 for HIGH or CRITICAL findings."),
-    require_complete: bool = typer.Option(False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."),
-    fail_on: FailureThreshold = typer.Option(FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."),
-    output_format: OutputFormat = typer.Option(OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."),
+    require_complete: bool = typer.Option(
+        False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."
+    ),
+    fail_on: FailureThreshold = typer.Option(
+        FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."
+    ),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."
+    ),
     max_files: int = typer.Option(20_000, "--max-files", min=1, help="Maximum files visited across the scan."),
     max_depth: int = typer.Option(64, "--max-depth", min=0, help="Maximum directory nesting depth."),
-    max_bytes: Optional[str] = typer.Option(None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."),
+    max_bytes: Optional[str] = typer.Option(
+        None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."
+    ),
     max_seconds: float = typer.Option(120.0, "--max-seconds", min=0.1, help="Maximum scan wall-clock time."),
-    follow_symlinks: bool = typer.Option(False, "--follow-symlinks", help="Traverse internal directory symlinks; links outside the target root are skipped."),
-    online: bool = typer.Option(False, "--online", help="Verify provenance and file integrity against the live Hugging Face Hub API."),
-    deep: bool = typer.Option(False, "--deep", help="With --online: stream SHA256 hashes of local weights and compare to upstream LFS OIDs."),
-    include_prompt_text: bool = typer.Option(False, "--include-prompt-text", help="With --format json: embed extracted chat-template and system-prompt text for `anubis redteam --judge`."),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Traverse internal directory symlinks; links outside the target root are skipped.",
+    ),
+    online: bool = typer.Option(
+        False, "--online", help="Verify provenance and file integrity against the live Hugging Face Hub API."
+    ),
+    deep: bool = typer.Option(
+        False, "--deep", help="With --online: stream SHA256 hashes of local weights and compare to upstream LFS OIDs."
+    ),
+    include_prompt_text: bool = typer.Option(
+        False,
+        "--include-prompt-text",
+        help="With --format json: embed extracted chat-template and system-prompt text for `anubis redteam --judge`.",
+    ),
 ) -> None:
     """Scan a local model file (.gguf, .safetensors), MLX / Hugging Face directory, or Ollama model store."""
     _check_prompt_text_format(include_prompt_text, output_format)
@@ -280,21 +303,43 @@ def scan_command(
 
 @app.command("audit")
 def audit_command(
-    workspace: Path = typer.Option(Path("."), "--workspace", "-w", help="Agent workspace directory to scan for secrets."),
+    workspace: Path = typer.Option(
+        Path("."), "--workspace", "-w", help="Agent workspace directory to scan for secrets."
+    ),
     model_path: Optional[Path] = typer.Option(None, "--model", "-m", help="Optional model file or directory to scan."),
     no_probe: bool = typer.Option(False, "--no-probe", help="Skip active API/CORS probes of detected local servers."),
-    online: bool = typer.Option(False, "--online", help="With --model: verify provenance against the live Hugging Face Hub API."),
-    deep: bool = typer.Option(False, "--deep", help="With --online: stream SHA256 hash verification against upstream LFS OIDs."),
+    online: bool = typer.Option(
+        False, "--online", help="With --model: verify provenance against the live Hugging Face Hub API."
+    ),
+    deep: bool = typer.Option(
+        False, "--deep", help="With --online: stream SHA256 hash verification against upstream LFS OIDs."
+    ),
     fail_on_high: bool = typer.Option(False, "--strict", help="Exit 1 for HIGH or CRITICAL findings."),
-    require_complete: bool = typer.Option(False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."),
-    fail_on: FailureThreshold = typer.Option(FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."),
-    output_format: OutputFormat = typer.Option(OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."),
+    require_complete: bool = typer.Option(
+        False, "--require-complete", help="Exit 1 if any requested scan work was skipped or incomplete."
+    ),
+    fail_on: FailureThreshold = typer.Option(
+        FailureThreshold.NEVER, "--fail-on", help="Exit 1 when a finding reaches this severity."
+    ),
+    output_format: OutputFormat = typer.Option(
+        OutputFormat.RICH, "--format", help="Report format: rich, json, or sarif."
+    ),
     max_files: int = typer.Option(20_000, "--max-files", min=1, help="Maximum files visited across the scan."),
     max_depth: int = typer.Option(64, "--max-depth", min=0, help="Maximum directory nesting depth."),
-    max_bytes: Optional[str] = typer.Option(None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."),
+    max_bytes: Optional[str] = typer.Option(
+        None, "--max-bytes", help="Maximum total bytes read (e.g. 4GiB); defaults to 2GiB or 16GiB with --deep."
+    ),
     max_seconds: float = typer.Option(120.0, "--max-seconds", min=0.1, help="Maximum scan wall-clock time."),
-    follow_symlinks: bool = typer.Option(False, "--follow-symlinks", help="Traverse internal directory symlinks; links outside the target root are skipped."),
-    include_prompt_text: bool = typer.Option(False, "--include-prompt-text", help="With --format json: embed extracted chat-template and system-prompt text for `anubis redteam --judge`."),
+    follow_symlinks: bool = typer.Option(
+        False,
+        "--follow-symlinks",
+        help="Traverse internal directory symlinks; links outside the target root are skipped.",
+    ),
+    include_prompt_text: bool = typer.Option(
+        False,
+        "--include-prompt-text",
+        help="With --format json: embed extracted chat-template and system-prompt text for `anubis redteam --judge`.",
+    ),
 ) -> None:
     """Audit the local environment (network, runners, workspace secrets, optional model)."""
     _check_prompt_text_format(include_prompt_text, output_format)
@@ -310,7 +355,9 @@ def audit_command(
         discovered_files: list[Path] = []
         metadata = _scan_path_target(model_path, report, budget, discovered_files)
         if online or deep:
-            verify_upstream(model_path, report, deep=deep, gguf_metadata=metadata, budget=budget, local_files=discovered_files)
+            verify_upstream(
+                model_path, report, deep=deep, gguf_metadata=metadata, budget=budget, local_files=discovered_files
+            )
     elif model_path is not None:
         report.mark_incomplete("requested model path does not exist")
     budget.add_summary_finding(report, str(workspace.resolve()))
@@ -322,15 +369,43 @@ def audit_command(
 @app.command("redteam")
 def redteam_command(
     report_path: Path = typer.Argument(..., exists=True, dir_okay=False, help="Anubis JSON report to review."),
-    model: Optional[str] = typer.Option(None, "--model", "-m", help="Reviewer model. Required for ollama/openai; anthropic defaults to claude-opus-5-5."),
-    provider: JudgeProvider = typer.Option(JudgeProvider.OLLAMA, "--provider", help="ollama, openai (any OpenAI-compatible server: LM Studio, llama.cpp, vLLM, OpenAI), or anthropic."),
-    judge: bool = typer.Option(False, "--judge", help="Judge prompt text exported with `scan --include-prompt-text` for harmful instructions, instead of generating test ideas."),
-    endpoint: Optional[str] = typer.Option(None, "--endpoint", help="Server origin (ollama: http://127.0.0.1:11434, openai: http://127.0.0.1:1234). Must be loopback unless --allow-remote."),
-    allow_remote: bool = typer.Option(False, "--allow-remote", help="Permit sending report data or prompt text to a non-loopback endpoint or the Anthropic API."),
-    timeout: float = typer.Option(90.0, "--timeout", min=0.1, max=300.0, help="Maximum time per reviewer request in seconds."),
-    max_requests: int = typer.Option(50, "--max-requests", min=1, help="With --judge: maximum model requests (bounds cost on large stores)."),
-    fail_on_verdict: VerdictThreshold = typer.Option(VerdictThreshold.NEVER, "--fail-on-verdict", help="With --judge: exit 1 when any text is judged at least this bad."),
-    output: Optional[Path] = typer.Option(None, "--output", "-o", help="Write results to a new JSON file instead of stdout."),
+    model: Optional[str] = typer.Option(
+        None, "--model", "-m", help="Reviewer model. Required for ollama/openai; anthropic defaults to claude-opus-5-5."
+    ),
+    provider: JudgeProvider = typer.Option(
+        JudgeProvider.OLLAMA,
+        "--provider",
+        help="ollama, openai (any OpenAI-compatible server: LM Studio, llama.cpp, vLLM, OpenAI), or anthropic.",
+    ),
+    judge: bool = typer.Option(
+        False,
+        "--judge",
+        help="Judge prompt text exported with `scan --include-prompt-text` for harmful instructions, instead of generating test ideas.",
+    ),
+    endpoint: Optional[str] = typer.Option(
+        None,
+        "--endpoint",
+        help="Server origin (ollama: http://127.0.0.1:11434, openai: http://127.0.0.1:1234). Must be loopback unless --allow-remote.",
+    ),
+    allow_remote: bool = typer.Option(
+        False,
+        "--allow-remote",
+        help="Permit sending report data or prompt text to a non-loopback endpoint or the Anthropic API.",
+    ),
+    timeout: float = typer.Option(
+        90.0, "--timeout", min=0.1, max=300.0, help="Maximum time per reviewer request in seconds."
+    ),
+    max_requests: int = typer.Option(
+        50, "--max-requests", min=1, help="With --judge: maximum model requests (bounds cost on large stores)."
+    ),
+    fail_on_verdict: VerdictThreshold = typer.Option(
+        VerdictThreshold.NEVER,
+        "--fail-on-verdict",
+        help="With --judge: exit 1 when any text is judged at least this bad.",
+    ),
+    output: Optional[Path] = typer.Option(
+        None, "--output", "-o", help="Write results to a new JSON file instead of stdout."
+    ),
 ) -> None:
     """Ask a selected model for test ideas, or with --judge for prompt-text verdicts; never runs the scanned model."""
     try:
@@ -367,7 +442,9 @@ def redteam_command(
         except FileExistsError as exc:
             raise typer.BadParameter("output file already exists; choose a new path", param_hint="--output") from exc
         except OSError as exc:
-            raise typer.BadParameter(f"could not write output ({exc.__class__.__name__})", param_hint="--output") from exc
+            raise typer.BadParameter(
+                f"could not write output ({exc.__class__.__name__})", param_hint="--output"
+            ) from exc
 
     if judge and fail_on_verdict != VerdictThreshold.NEVER:
         worst = worst_verdict(result)

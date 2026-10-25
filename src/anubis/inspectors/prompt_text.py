@@ -42,11 +42,34 @@ BIDI_CONTROLS = set("‪‫‬‭‮⁦⁧⁨⁩")
 ZERO_WIDTH = set("​‌‍⁠⁡⁢⁣⁤﻿")
 
 # Common Cyrillic/Greek homoglyphs that NFKC leaves untouched.
-HOMOGLYPHS = str.maketrans({
-    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i",
-    "ј": "j", "ѕ": "s", "ԁ": "d", "ɡ": "g", "һ": "h", "ӏ": "l", "ο": "o", "α": "a",
-    "ε": "e", "ι": "i", "κ": "k", "ν": "v", "ρ": "p", "τ": "t", "υ": "u", "χ": "x",
-})
+HOMOGLYPHS = str.maketrans(
+    {
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "у": "y",
+        "х": "x",
+        "і": "i",
+        "ј": "j",
+        "ѕ": "s",
+        "ԁ": "d",
+        "ɡ": "g",
+        "һ": "h",
+        "ӏ": "l",
+        "ο": "o",
+        "α": "a",
+        "ε": "e",
+        "ι": "i",
+        "κ": "k",
+        "ν": "v",
+        "ρ": "p",
+        "τ": "t",
+        "υ": "u",
+        "χ": "x",
+    }
+)
 
 _W = r"(?:\W+\w+)"  # one intervening word
 SENSITIVE_DATA = (
@@ -72,60 +95,82 @@ class InstructionRule:
     near: Optional[re.Pattern[str]] = None
 
 
-def _rule(category: str, title: str, severity: Severity, pattern: str, near: Optional[re.Pattern[str]] = None) -> InstructionRule:
+def _rule(
+    category: str, title: str, severity: Severity, pattern: str, near: Optional[re.Pattern[str]] = None
+) -> InstructionRule:
     return InstructionRule(category, title, severity, re.compile(pattern), near)
 
 
 INSTRUCTION_RULES: tuple[InstructionRule, ...] = (
     _rule(
-        "override", "Instruction Override Directive", Severity.HIGH,
+        "override",
+        "Instruction Override Directive",
+        Severity.HIGH,
         rf"\b(?:ignore|disregard|forget|override|bypass)\b{_W}{{0,4}}?\W+"
         r"(?:previous|prior|above|earlier|preceding|original|system|developer|safety)\W+(?:\w+\W+)?"
         r"(?:instructions?|prompts?|rules|guidelines|directives|messages|guardrails|polic(?:y|ies)|restrictions)\b",
     ),
     _rule(
-        "override", "Instruction Override Directive", Severity.HIGH,
+        "override",
+        "Instruction Override Directive",
+        Severity.HIGH,
         r"\byou\W+are\W+no\W+longer\W+(?:bound|restricted|limited)\b",
     ),
     _rule(
-        "exfiltration", "Data Exfiltration Instruction", Severity.HIGH,
+        "exfiltration",
+        "Data Exfiltration Instruction",
+        Severity.HIGH,
         rf"\b(?:exfiltrat\w*|leak|smuggle)\b{_W}{{0,6}}?\W+{CONVERSATION_DATA}\b",
     ),
     _rule(
-        "exfiltration", "Data Exfiltration Instruction", Severity.HIGH,
+        "exfiltration",
+        "Data Exfiltration Instruction",
+        Severity.HIGH,
         rf"\b(?:send|post|upload|forward|transmit|submit|report|copy)\b{_W}{{0,8}}?\W+to\W+"
         r"(?:(?:the|this|that|our|my|a|an)\W+)?(?:(?:remote|external|following|collection|attacker)\W+)?"
         r"(?:url|endpoint|server|webhook|address|domain|host|api|email)\b",
         near=re.compile(rf"\b{CONVERSATION_DATA}\b"),
     ),
     _rule(
-        "exfiltration", "Data Exfiltration Instruction", Severity.HIGH,
+        "exfiltration",
+        "Data Exfiltration Instruction",
+        Severity.HIGH,
         rf"\b(?:include|embed|render|append|encode|put)\b{_W}{{0,8}}?\W+(?:markdown\W+)?(?:image|img|link|url|query\W+string)\b",
         near=re.compile(rf"\b{CONVERSATION_DATA}\b"),
     ),
     _rule(
-        "credential_harvest", "Credential Harvesting Instruction", Severity.HIGH,
+        "credential_harvest",
+        "Credential Harvesting Instruction",
+        Severity.HIGH,
         rf"\b(?:ask|request|prompt|convince|persuade|trick|get|encourage|require|tell|have)\W+(?:the\W+|their\W+)?users?\b"
         rf"{_W}{{0,3}}?\W+(?:paste|share|provide|enter|send|give|type|reveal|confirm|disclose|submit|read\W+out|verify)\b",
         near=SENSITIVE_DATA_REGEX,
     ),
     _rule(
-        "credential_harvest", "Credential Harvesting Instruction", Severity.HIGH,
+        "credential_harvest",
+        "Credential Harvesting Instruction",
+        Severity.HIGH,
         rf"\b(?:ask|request|collect|obtain|harvest|gather)\b{_W}{{0,4}}?\W+(?:for\W+)?(?:their|the\W+user'?s?|users'?)\W+{SENSITIVE_DATA}\b",
     ),
     _rule(
-        "harmful_action", "Harmful Action Steering", Severity.HIGH,
+        "harmful_action",
+        "Harmful Action Steering",
+        Severity.HIGH,
         r"\b(?:tell|instruct|advise|recommend|convince|persuade|encourage|urge|direct|get)\W+(?:the\W+)?users?\W+to\W+"
         r"(?:\w+\W+){0,2}?(?:run|execute|install|download|disable|turn\W+off|uninstall|paste|visit|click|"
         r"transfer|wire|deposit|grant|approve)\b",
     ),
     _rule(
-        "harmful_action", "Harmful Action Steering", Severity.HIGH,
+        "harmful_action",
+        "Harmful Action Steering",
+        Severity.HIGH,
         r"\bdisable\W+(?:the\W+|their\W+|your\W+)?(?:antivirus|anti\W?virus|firewall|defender|edr|2fa|"
         r"two\W+factor|mfa|security\W+(?:software|settings|features|warnings))\b",
     ),
     _rule(
-        "harmful_action", "Embedded Shell Payload", Severity.HIGH,
+        "harmful_action",
+        "Embedded Shell Payload",
+        Severity.HIGH,
         r"\b(?:curl|wget|iwr|invoke-webrequest)\b[^\n|]{0,200}\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b"
         r"|\bbase64\s+(?:-d|--decode)\b[^\n]{0,60}\|\s*(?:ba|z)?sh\b"
         r"|\bpowershell(?:\.exe)?\b[^\n]{0,60}\s-(?:e|enc|encodedcommand)\s"
@@ -133,31 +178,43 @@ INSTRUCTION_RULES: tuple[InstructionRule, ...] = (
         r"|\brm\s+-rf\s+(?:/|~|\$home)",
     ),
     _rule(
-        "safety_bypass", "Safety Guardrail Removal", Severity.MEDIUM,
+        "safety_bypass",
+        "Safety Guardrail Removal",
+        Severity.MEDIUM,
         r"\b(?:no|without|free\W+from|not\W+bound\W+by|ignore)\W+(?:any\W+|all\W+)?(?:ethical|moral|safety|content)\W+"
         r"(?:guidelines|restrictions|filters|constraints|limits|rules|polic(?:y|ies)|guardrails)\b",
     ),
     _rule(
-        "safety_bypass", "Safety Guardrail Removal", Severity.MEDIUM,
+        "safety_bypass",
+        "Safety Guardrail Removal",
+        Severity.MEDIUM,
         r"\bdo\W+anything\W+now\b|\b(?:developer|god|jailbreak|jailbroken|dan)\W+mode\b|\bjailbr(?:eak|oken)\b",
     ),
     _rule(
-        "deception", "User Deception Instruction", Severity.MEDIUM,
+        "deception",
+        "User Deception Instruction",
+        Severity.MEDIUM,
         r"\b(?:lie\W+to|deceive|mislead|manipulate|gaslight)\W+(?:the\W+)?users?\b",
     ),
     _rule(
-        "deception", "User Deception Instruction", Severity.MEDIUM,
+        "deception",
+        "User Deception Instruction",
+        Severity.MEDIUM,
         r"\bpretend\W+(?:to\W+be|you\W+are)\W+(?:an?\W+|the\W+)?(?:official|real|human|bank|support|"
         r"customer\W+service|it\W+department|administrator|admin|government|police)\b"
         r"|\b(?:claim|say|insist)\W+(?:that\W+)?you\W+are\W+(?:a\W+)?(?:real\W+)?human\b",
     ),
     _rule(
-        "concealment", "Self-Concealing Instruction", Severity.MEDIUM,
+        "concealment",
+        "Self-Concealing Instruction",
+        Severity.MEDIUM,
         r"\b(?:do\W+not|don'?t|never|must\W+not)\W+(?:\w+\W+){0,2}?(?:reveal|mention|disclose|admit|acknowledge|"
         r"reference|repeat|discuss)\W+(?:this|these|that|the\W+(?:above|following|hidden|secret))\b",
     ),
     _rule(
-        "concealment", "Self-Concealing Instruction", Severity.MEDIUM,
+        "concealment",
+        "Self-Concealing Instruction",
+        Severity.MEDIUM,
         r"\b(?:keep|treat)\W+(?:this|these)\W+(?:\w+\W+)?(?:secret|hidden|confidential)\b"
         r"|\bwithout\W+(?:telling|informing|notifying|alerting|asking)\W+(?:the\W+)?users?\b"
         r"|\b(?:the\W+)?users?\W+(?:must|should|can)\W*(?:never|not)\W+(?:know|find\W+out|notice|learn)\b"
@@ -281,7 +338,7 @@ def audit_prompt_text(
         for rule in INSTRUCTION_RULES:
             for match in rule.pattern.finditer(normalized):
                 if rule.near is not None:
-                    window = normalized[max(0, match.start() - 160): match.end() + 160]
+                    window = normalized[max(0, match.start() - 160) : match.end() + 160]
                     if not rule.near.search(window):
                         continue
                 excerpt = _excerpt(normalized, match.start(), match.end())

@@ -45,12 +45,38 @@ MAX_TAINT_PASSES = 10
 CONTENT_KEYS = {"content"}
 # Fields of a message or multimodal content part that describe structure, not user text.
 STRUCTURAL_KEYS = {
-    "type", "role", "name", "id", "tool_call_id", "image", "image_url", "url", "video", "audio",
-    "input_audio", "file", "mime_type", "detail", "function", "arguments", "tool_calls",
+    "type",
+    "role",
+    "name",
+    "id",
+    "tool_call_id",
+    "image",
+    "image_url",
+    "url",
+    "video",
+    "audio",
+    "input_audio",
+    "file",
+    "mime_type",
+    "detail",
+    "function",
+    "arguments",
+    "tool_calls",
 }
 CONTENT_STRING_METHODS = {
-    "startswith", "endswith", "find", "rfind", "index", "rindex", "count", "split", "rsplit",
-    "partition", "rpartition", "replace", "__contains__",
+    "startswith",
+    "endswith",
+    "find",
+    "rfind",
+    "index",
+    "rindex",
+    "count",
+    "split",
+    "rsplit",
+    "partition",
+    "rpartition",
+    "replace",
+    "__contains__",
 }
 REWRITE_METHODS = {"replace"}
 SELECT_FILTERS = {"select", "reject"}
@@ -149,8 +175,13 @@ class _TemplateModel:
             value, key = self.fold(node.node, depth), node.arg
             if isinstance(value, (str, list)):
                 if isinstance(key, nodes.Slice):
-                    bounds = [None if part is None else self.fold(part, depth) for part in (key.start, key.stop, key.step)]
-                    if all(b is None or (isinstance(b, int) and not isinstance(b, bool)) for b in bounds) and bounds[2] != 0:
+                    bounds = [
+                        None if part is None else self.fold(part, depth) for part in (key.start, key.stop, key.step)
+                    ]
+                    if (
+                        all(b is None or (isinstance(b, int) and not isinstance(b, bool)) for b in bounds)
+                        and bounds[2] != 0
+                    ):
                         return value[slice(*bounds)]
                     return _UNKNOWN
                 index = self.fold(key, depth)
@@ -224,7 +255,9 @@ class _TemplateModel:
                 return True
             if self.is_content(node.node):
                 return True
-            return isinstance(node, nodes.Getitem) and not isinstance(node.arg, nodes.Slice) and self.is_content(node.arg)
+            return (
+                isinstance(node, nodes.Getitem) and not isinstance(node.arg, nodes.Slice) and self.is_content(node.arg)
+            )
         if isinstance(node, nodes.Name):
             return node.name in self.tainted_names
         if isinstance(node, nodes.Keyword):

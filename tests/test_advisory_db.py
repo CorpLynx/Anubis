@@ -56,9 +56,7 @@ def test_unchanged_advisories_keep_manual_severity_and_snapshot_date() -> None:
                 "id": advisory["id"],
                 "aliases": [],
                 "summary": advisory["summary"],
-                "affected": [
-                    {"package": OSV_PACKAGE, "ranges": [{"type": "SEMVER", "events": advisory["ranges"][0]}]}
-                ],
+                "affected": [{"package": OSV_PACKAGE, "ranges": [{"type": "SEMVER", "events": advisory["ranges"][0]}]}],
             }
         ]
     }

@@ -37,10 +37,7 @@ def test_hf_trusted_repo_and_deep_hash_pass(tmp_path: Path, monkeypatch) -> None
     report = ScanReport(target=str(weight))
     provenance.verify_upstream(weight, report, deep=True)
 
-    assert any(
-        f.severity == Severity.INFO and "Recognized Organization" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.INFO and "Recognized Organization" in f.title for f in report.findings)
     assert any(f.severity == Severity.PASS and "SHA256" in f.title for f in report.findings)
 
 
@@ -52,10 +49,7 @@ def test_hf_same_size_tampering_fails_sha256(tmp_path: Path, monkeypatch) -> Non
     report = ScanReport(target=str(weight))
     provenance.verify_upstream(weight, report, deep=True)
 
-    assert any(
-        f.severity == Severity.CRITICAL and "SHA256 Differs" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "SHA256 Differs" in f.title for f in report.findings)
 
 
 def test_hf_size_mismatch_is_high(tmp_path: Path, monkeypatch) -> None:
@@ -78,10 +72,7 @@ def test_hf_missing_repo_degrades_to_finding(tmp_path: Path, monkeypatch) -> Non
     report = ScanReport(target=str(weight))
     provenance.verify_upstream(weight, report)
 
-    assert any(
-        f.severity == Severity.MEDIUM and "Not Publicly Verifiable" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.MEDIUM and "Not Publicly Verifiable" in f.title for f in report.findings)
 
 
 def test_hf_offline_fails_open_as_info(tmp_path: Path, monkeypatch) -> None:
@@ -106,10 +97,7 @@ def test_untrusted_low_adoption_upstream_is_medium(tmp_path: Path, monkeypatch) 
     report = ScanReport(target=str(weight))
     provenance.verify_upstream(weight, report)
 
-    assert any(
-        f.severity == Severity.MEDIUM and "Low-Adoption" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.MEDIUM and "Low-Adoption" in f.title for f in report.findings)
 
 
 def test_directory_name_is_only_a_heuristic_not_a_trust_pass(tmp_path: Path) -> None:
@@ -119,10 +107,7 @@ def test_directory_name_is_only_a_heuristic_not_a_trust_pass(tmp_path: Path) -> 
 
     provenance.audit_model_provenance(fake_claim, {}, report)
 
-    assert any(
-        f.severity == Severity.INFO and "Uploader Name Heuristic" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.INFO and "Uploader Name Heuristic" in f.title for f in report.findings)
     assert not any(f.severity == Severity.PASS for f in report.findings)
 
 
@@ -146,6 +131,4 @@ def test_upstream_path_match_disambiguates_duplicate_basenames(tmp_path: Path, m
 
     provenance.verify_upstream(snapshot, report)
 
-    assert any(
-        f.severity == Severity.HIGH and "Size Differs" in f.title for f in report.findings
-    )
+    assert any(f.severity == Severity.HIGH and "Size Differs" in f.title for f in report.findings)

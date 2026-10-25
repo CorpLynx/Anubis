@@ -38,9 +38,7 @@ def _make_gguf(path: Path, elements: int, payload_bytes: int) -> None:
 
 
 def _make_safetensors(path: Path, shape: list[int], data_bytes: int) -> None:
-    header = {
-        "weight": {"dtype": "F16", "shape": shape, "data_offsets": [0, data_bytes]}
-    }
+    header = {"weight": {"dtype": "F16", "shape": shape, "data_offsets": [0, data_bytes]}}
     encoded = json.dumps(header).encode("utf-8")
     path.write_bytes(struct.pack("<Q", len(encoded)) + encoded + b"\x00" * data_bytes)
 
@@ -100,9 +98,11 @@ def run_security_corpus(manifest_path: Path) -> dict[str, Any]:
                     "kind": kind,
                     "expected": expected,
                     "pass": passed,
-                    "max_severity": max(
-                        report.findings, key=lambda f: SEVERITY_RANK[f.severity]
-                    ).severity.value if report.findings else None,
+                    "max_severity": (
+                        max(report.findings, key=lambda f: SEVERITY_RANK[f.severity]).severity.value
+                        if report.findings
+                        else None
+                    ),
                     "rule_ids": sorted({f.rule_id for f in report.findings}),
                 }
             )
