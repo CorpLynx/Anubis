@@ -11,7 +11,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from anubis.limits import DEFAULT_SKIP_DIRS, ScanBudget, ScanLimitExceeded
+from anubis.limits import ScanBudget, ScanLimitExceeded
 from anubis.models import ScanReport, Severity
 
 MAX_HEADER_SIZE = 100 * 1024 * 1024  # 100 MB safety ceiling

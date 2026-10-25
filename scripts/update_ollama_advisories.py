@@ -12,7 +12,7 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-from anubis.advisory_db import OSV_PACKAGE, OSV_QUERY_URL, load_ollama_advisories, normalize_osv_response
+from anubis.advisory_db import OSV_PACKAGE, OSV_QUERY_URL, normalize_osv_response
 
 
 def fetch_osv_payload(timeout: float = 30.0) -> dict:

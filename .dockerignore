@@ -1,0 +1,57 @@
+# The image only needs pyproject.toml, README.md and src/.
+
+# VCS and CI
+.git
+.github/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.env
+.venv*/
+env/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test and coverage output
+tests/
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+.hypothesis/
+.pytest_cache/
+.mypy_cache/
+
+# Anubis output
+.anubis_cache/
+scan_results/
+report_output/
+*.sarif
+
+# Local model weights should be mounted at run time, never baked into the image
+*.gguf
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db

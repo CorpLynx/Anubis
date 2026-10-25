@@ -118,9 +118,159 @@ Phrase rules miss paraphrased instructions, so `anubis redteam --judge` asks a m
 - **Injection handling:** judged text is wrapped in random-id delimiters and treated strictly as data; text that tries to influence the judge is classified as `judge_manipulation`. Output is schema-constrained and validated. A model that declines to judge (for example, a safety refusal) is recorded as `JUDGE_DECLINED`, never as benign.
 - **Cost and CI:** identical texts are judged once, long texts are chunked (the worst verdict wins), and `--max-requests` (default 50) bounds spend. `--fail-on-verdict suspicious|malicious` exits 1 for CI. Verdicts never change scan findings, severities, or the scan's exit status, and a `benign` verdict is not proof of safety.
 
+## Containerization with Docker
+
+Build a portable Anubis scanner container:
+
+```bash
+# Build the Docker image
+docker build -t anubis-scanner:latest .
+
+# Optional: include the Anthropic SDK for `anubis redteam --provider anthropic`
+docker build --build-arg EXTRAS=judge -t anubis-scanner:judge .
+
+# Scan a model; mount it read-only under /scan
+docker run --rm -v "$PWD":/scan:ro anubis-scanner:latest scan /scan/model.gguf
+
+# Scan the host's Ollama model store
+docker run --rm -v ~/.ollama/models:/scan:ro anubis-scanner:latest scan /scan
+```
+
+The image is built on `python:3.12-slim-bookworm`, installs Anubis from `pyproject.toml` with no compilers or extra system packages, and runs as an unprivileged `anubis` user with `anubis` as the entrypoint. Model weights are never copied into the image (see [.dockerignore](.dockerignore)).
+
+`anubis audit` inside a container inspects the container's own network and processes, not the host's, so run `audit` on the host.
+
+## CI/CD with GitHub Actions
+
+The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow runs on every push to `main` and every pull request:
+
+- **lint**: Ruff with the rule set pinned in `pyproject.toml`
+- **test**: the pytest suite, the labeled threat-corpus benchmark, and a CLI smoke test, on Python 3.10–3.15 (Linux) plus macOS and Windows
+- **scan-sarif**: scans a clean and a malicious example model through the CLI, checks the exit codes, and uploads the SARIF report as a workflow artifact
+- **docker**: builds the image and runs the CLI inside it
+- **fuzz-smoke**: short coverage-guided fuzzing runs of the GGUF, Safetensors, and Jinja parsers
+
+A separate **advisories** job runs weekly (and from the Actions tab via `workflow_dispatch`). It fails when the bundled Ollama OSV advisory snapshot is out of date; run `make update-advisories` and review the diff.
+
+To scan your own models in another repository's pipeline, run `anubis scan <path> --format sarif > results.sarif` and upload `results.sarif` with `github/codeql-action/upload-sarif` (the job needs `security-events: write`).
+
+## Script Wrappers
+
+The `scripts/` directory has wrappers for common use cases. They use `$ANUBIS_BIN` if set, then the project's `.venv`, then `anubis` on `PATH`. Progress messages go to stderr, so JSON and SARIF on stdout can be redirected to a file.
+
+### Quick Scan (fast, tight limits)
+```bash
+# Quick scan of a model: 100 files, depth 8, 30 s, 512 MiB by default
+./scripts/quick-scan.sh ~/.cache/huggingface/hub/models--org--repo
+
+# With JSON output
+./scripts/quick-scan.sh model.gguf --format json > quick-scan.json
+
+# Pass any other `anubis scan` option after --
+./scripts/quick-scan.sh model.gguf -- --fail-on high
+```
+
+### Full Scan (comprehensive inspection)
+```bash
+# Full security audit with all checks
+./scripts/full-scan.sh ~/.cache/huggingface/hub/models--org--repo
+
+# With online provenance verification
+./scripts/full-scan.sh model.safetensors --online
+
+# Deep verification with hash comparison (implies --online)
+./scripts/full-scan.sh model.safetensors --deep --max-bytes 32GiB
+
+# Fail the build on CRITICAL findings only
+./scripts/full-scan.sh model.gguf --fail-on-critical
+```
+
+### Watch Mode (continuous monitoring)
+```bash
+# Scan a directory, then rescan models as they are added or changed
+./scripts/watch.sh ~/.cache/huggingface/hub
+
+# Append results to a file instead of stdout, checking every 30 s
+./scripts/watch.sh /models --format json --output scan-watches.log --interval 30
+```
+
+Watch mode rescans a `.gguf` file on its own, and rescans the containing directory when a `.safetensors`, `tokenizer_config.json`, or chat-template file changes. The interval defaults to 5 seconds, or `$ANUBIS_INTERVAL`.
+
+### Using Makefile Targets
+
+The [Makefile](Makefile) provides convenient targets:
+
+```bash
+# Quick scan (tight limits)
+make quick MODEL=model.gguf
+
+# Full scan with online provenance checks
+make full MODEL=model.safetensors FORMAT=json > results.json
+
+# Continuous watch mode
+make watch WATCH_DIR=/models
+
+# SARIF report written to results.sarif
+make sarif MODEL=model.gguf
+
+# Run tests, lint, or both plus the corpus benchmark
+make test
+make lint
+make ci
+
+# Build the Docker image
+make build
+
+# Clean build artifacts
+make clean
+```
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ANUBIS_SOURCE_URL` | Source archive URL or local path for the standalone installers | GitHub `main` archive |
+| `ANUBIS_BIN` | Anubis executable used by the `scripts/` wrappers | `.venv/bin/anubis`, then `anubis` on `PATH` |
+| `ANUBIS_INTERVAL` | Seconds between checks in `scripts/watch.sh` | 5 |
+
+Scan limits are set with command-line options (`--max-files`, `--max-depth`, `--max-seconds`, `--max-bytes`), not environment variables.
+
 ## Development
 
 ```bash
 pip install -e '.[dev]'
 pytest
 ```
+
+### Running Tests
+
+```bash
+# Run all tests
+pytest -v
+
+# Labeled threat corpus benchmark
+python scripts/benchmark_security_corpus.py
+
+# End-to-end CLI smoke test
+python scripts/ci_scan_smoke.py
+```
+
+### Linting
+
+```bash
+pip install ruff
+ruff check src tests scripts
+```
+
+### Fuzzing (Linux only)
+
+Install with fuzz support and run coverage-guided fuzzing:
+
+```bash
+pip install -e '.[dev,fuzz]'
+python scripts/fuzz_anubis.py gguf -runs=1000
+```
+
+## Contributing
+
+See the [Development](#development) section for setup and testing instructions. Report issues via GitHub Issues; pull requests are welcome once `make ci` passes.

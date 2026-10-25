@@ -99,7 +99,7 @@ def _render_report(
     console.print(
         Panel.fit(
             (
-                f"[bold red]Anubis Scan INCOMPLETE[/bold red]"
+                "[bold red]Anubis Scan INCOMPLETE[/bold red]"
                 if not report.complete else "[bold cyan]Anubis Security Audit[/bold cyan]"
             ) + f"\nTarget: [white]{_safe_rich_text(report.target)}[/white]",
             border_style="red" if not report.complete else "cyan",
