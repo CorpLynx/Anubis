@@ -99,7 +99,7 @@ docker compose run --rm anubis
 
 | Job | Purpose | Triggers |
 |-----|---------|----------|
-| `lint` | Ruff with the rule set pinned in `pyproject.toml` | Push to `main`, pull requests |
+| `lint` | Ruff and a Black format check, configured in `pyproject.toml` | Push to `main`, pull requests |
 | `test` | pytest, threat-corpus benchmark, CLI smoke test on Python 3.10–3.15, macOS, Windows | Push to `main`, pull requests |
 | `scan-sarif` | Scans clean and malicious example models, uploads the SARIF report as an artifact | Push to `main`, pull requests |
 | `docker` | Builds the image and runs the CLI in it | Push to `main`, pull requests |

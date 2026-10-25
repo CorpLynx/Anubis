@@ -19,7 +19,7 @@ Key features:
 #### GitHub Actions Workflow (`.github/workflows/ci.yml`)
 Extends the existing test matrix and fuzz smoke job with:
 
-1. **lint**: Ruff, with the rule set pinned in `pyproject.toml`
+1. **lint**: Ruff and a Black format check (line length 120), both configured in `pyproject.toml`
 2. **CLI smoke test** (`scripts/ci_scan_smoke.py`): scans a clean and a malicious example model through `anubis scan` and checks exit codes and findings, on every matrix entry
 3. **scan-sarif**: uploads the example scan's SARIF report as a workflow artifact
 4. **docker**: builds the image and runs the CLI inside it
@@ -48,7 +48,8 @@ Convenient targets for common operations:
 - `make watch WATCH_DIR=<directory>` - Continuous scanning
 - `make sarif MODEL=<model>` / `make json MODEL=<model>` - Write a report file
 - `make test` - Run pytest test suite
-- `make lint` - Lint code with Ruff
+- `make lint` - Lint with Ruff and check formatting with Black
+- `make format` - Format code with Black
 - `make ci` - CI-style check (lint + test + corpus benchmark)
 - `make build` - Build the Docker image
 - `make clean` - Remove build artifacts and cache

@@ -144,7 +144,7 @@ The image is built on `python:3.12-slim-bookworm`, installs Anubis from `pyproje
 
 The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow runs on every push to `main` and every pull request:
 
-- **lint**: Ruff with the rule set pinned in `pyproject.toml`
+- **lint**: Ruff and a Black format check, both configured in `pyproject.toml`
 - **test**: the pytest suite, the labeled threat-corpus benchmark, and a CLI smoke test, on Python 3.10–3.15 (Linux) plus macOS and Windows
 - **scan-sarif**: scans a clean and a malicious example model through the CLI, checks the exit codes, and uploads the SARIF report as a workflow artifact
 - **docker**: builds the image and runs the CLI inside it
@@ -258,8 +258,9 @@ python scripts/ci_scan_smoke.py
 ### Linting
 
 ```bash
-pip install ruff
+pip install ruff "black==26.10.1"
 ruff check src tests scripts
+black --check src tests scripts   # `black src tests scripts` or `make format` to fix
 ```
 
 ### Fuzzing (Linux only)

@@ -4,7 +4,7 @@
 # Usage: make <target> [VAR=value ...]
 
 SHELL := /bin/bash
-.PHONY: help require-model quick full watch build test lint benchmark clean audit update-advisories install ci sarif json
+.PHONY: help require-model quick full watch build test lint benchmark clean audit update-advisories install ci sarif json format
 
 # Default configuration
 FORMAT ?= rich
@@ -28,9 +28,10 @@ help:
 	@echo "  build                      Build Docker image ($(IMAGE))"
 	@echo "  install                    Install Anubis in editable mode with dev extras"
 	@echo "  test                       Run pytest test suite"
-	@echo "  lint                       Lint code with ruff"
+	@echo "  lint                       Lint with ruff and check formatting with black"
 	@echo "  benchmark                  Run the labeled threat corpus benchmark"
 	@echo "  ci                         lint + test + benchmark"
+	@echo "  format                     Format code with black"
 	@echo "  clean                      Remove build artifacts and cache"
 	@echo "  update-advisories          Refresh Ollama security advisories"
 	@echo ""
@@ -82,9 +83,14 @@ install:
 test:
 	$(PYTHON) -m pytest -v
 
-# Lint code with ruff (rule selection lives in pyproject.toml)
+# Lint with ruff and check formatting with black (both configured in pyproject.toml)
 lint:
 	ruff check src tests scripts
+	black --check src tests scripts
+
+# Format code with black
+format:
+	black src tests scripts
 
 # Run the labeled threat corpus benchmark
 benchmark:

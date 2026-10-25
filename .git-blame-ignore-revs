@@ -1,0 +1,5 @@
+# Formatting-only commits, skipped by `git blame` on GitHub
+# Locally: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Format the codebase with black (line length 120)
+9df2c7f9266ad746e21967d1e963b6b795e88f48
