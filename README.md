@@ -150,7 +150,7 @@ The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow runs on ever
 - **docker**: builds the image and runs the CLI inside it
 - **fuzz-smoke**: short coverage-guided fuzzing runs of the GGUF, Safetensors, and Jinja parsers
 
-A separate **advisories** job runs weekly (and from the Actions tab via `workflow_dispatch`). It fails when the bundled Ollama OSV advisory snapshot is out of date; run `make update-advisories` and review the diff.
+The Ollama OSV advisory snapshot is refreshed separately by `.github/workflows/update-ollama-advisories.yml` (see [Advisory refresh and fuzzing](#advisory-refresh-and-fuzzing)).
 
 To scan your own models in another repository's pipeline, run `anubis scan <path> --format sarif > results.sarif` and upload `results.sarif` with `github/codeql-action/upload-sarif` (the job needs `security-events: write`).
 

@@ -23,7 +23,6 @@ Extends the existing test matrix and fuzz smoke job with:
 2. **CLI smoke test** (`scripts/ci_scan_smoke.py`): scans a clean and a malicious example model through `anubis scan` and checks exit codes and findings, on every matrix entry
 3. **scan-sarif**: uploads the example scan's SARIF report as a workflow artifact
 4. **docker**: builds the image and runs the CLI inside it
-5. **advisories**: weekly (Sunday 00:00 UTC) and manual check that the bundled Ollama OSV advisory snapshot is current
 
 #### Script Wrappers in `scripts/` directory:
 

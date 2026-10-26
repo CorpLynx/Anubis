@@ -1,6 +1,7 @@
 """Tests for stable finding metadata and JSON/SARIF rendering."""
 
 import json
+import re
 from io import StringIO
 
 from rich.console import Console
@@ -110,5 +111,7 @@ def test_require_complete_cli_option_is_exposed() -> None:
 
     result = CliRunner().invoke(cli.app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--require-complete" in result.stdout
-    assert "--max-bytes" in result.stdout
+    # Rich colors help text when it detects CI (e.g. GITHUB_ACTIONS), splitting option names with ANSI codes
+    help_text = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    assert "--require-complete" in help_text
+    assert "--max-bytes" in help_text
