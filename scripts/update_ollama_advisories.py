@@ -12,7 +12,7 @@ import urllib.request
 from datetime import date
 from pathlib import Path
 
-from anubis.advisory_db import OSV_PACKAGE, OSV_QUERY_URL, load_ollama_advisories, normalize_osv_response
+from anubis.advisory_db import OSV_PACKAGE, OSV_QUERY_URL, normalize_osv_response
 
 
 def fetch_osv_payload(timeout: float = 30.0) -> dict:
@@ -56,7 +56,9 @@ def canonical_database(data: dict) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--check", action="store_true", help="Exit 1 if the local snapshot needs an update; do not write it.")
+    parser.add_argument(
+        "--check", action="store_true", help="Exit 1 if the local snapshot needs an update; do not write it."
+    )
     parser.add_argument(
         "--database",
         type=Path,
@@ -78,12 +80,16 @@ def main() -> int:
             added = len(new_by_id.keys() - old_by_id.keys())
             removed = len(old_by_id.keys() - new_by_id.keys())
             changed = sum(old_by_id[item_id] != new_by_id[item_id] for item_id in old_by_id.keys() & new_by_id.keys())
-            print(f"Ollama OSV snapshot needs review: {added} new, {removed} removed/withdrawn, {changed} changed advisory IDs.")
+            print(
+                f"Ollama OSV snapshot needs review: {added} new, {removed} removed/withdrawn, {changed} changed advisory IDs."
+            )
             return 1
         write_atomic(args.database, updated)
         old_ids = {item.get("id") for item in previous.get("advisories", [])}
         new_ids = {item.get("id") for item in updated.get("advisories", [])}
-        print(f"Wrote OSV snapshot {updated['snapshot_date']}: {len(new_ids - old_ids)} new, {len(old_ids - new_ids)} removed/withdrawn advisory IDs.")
+        print(
+            f"Wrote OSV snapshot {updated['snapshot_date']}: {len(new_ids - old_ids)} new, {len(old_ids - new_ids)} removed/withdrawn advisory IDs."
+        )
         print("Review the diff; new or changed advisories are informational until severity is curated.")
         return 0
     except Exception as exc:

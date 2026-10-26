@@ -10,3 +10,7 @@ venv/
 .hypothesis/
 .ruff_cache/
 anubis.zip
+
+# Report files written by make sarif / make json
+results.sarif
+scan-results.json

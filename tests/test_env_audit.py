@@ -135,16 +135,18 @@ def test_windows_netstat_fallback_parses_ipv4_and_ipv6_listeners() -> None:
 
     listeners = _parse_windows_netstat(output)
 
-    assert any((listener.ip, listener.port, listener.service) == ("0.0.0.0", 11434, "Ollama API") for listener in listeners)
-    assert any((listener.ip, listener.port, listener.service) == ("::", 1234, "LM Studio Server") for listener in listeners)
+    assert any(
+        (listener.ip, listener.port, listener.service) == ("0.0.0.0", 11434, "Ollama API") for listener in listeners
+    )
+    assert any(
+        (listener.ip, listener.port, listener.service) == ("::", 1234, "LM Studio Server") for listener in listeners
+    )
     assert not any(listener.port == 8000 for listener in listeners)
 
 
 def test_process_signature_finds_ai_runner_on_custom_port(monkeypatch) -> None:
     monkeypatch.setattr(env_audit, "_process_identity", lambda pid: ("Ollama API", "ollama.exe"))
-    listeners = _parse_windows_netstat(
-        "TCP 127.0.0.1:45678 0.0.0.0:0 LISTENING 9999\n"
-    )
+    listeners = _parse_windows_netstat("TCP 127.0.0.1:45678 0.0.0.0:0 LISTENING 9999\n")
 
     assert len(listeners) == 1
     assert listeners[0].port == 45678
@@ -200,8 +202,5 @@ def test_specific_non_loopback_binding_is_not_reported_safe() -> None:
         probe=False,
         listeners=[("192.168.1.25", 11434, "Ollama API")],
     )
-    assert any(
-        f.severity == Severity.CRITICAL and "Non-Loopback" in f.title
-        for f in report.findings
-    )
+    assert any(f.severity == Severity.CRITICAL and "Non-Loopback" in f.title for f in report.findings)
     assert not any(f.severity == Severity.PASS for f in report.findings)

@@ -72,9 +72,7 @@ def _get_json(url: str, timeout: float = 6.0, budget: Optional[ScanBudget] = Non
     return json.loads(body.decode("utf-8"))
 
 
-def _sha256_of(
-    path: Path, chunk_size: int = 8 * 1024 * 1024, budget: Optional[ScanBudget] = None
-) -> str:
+def _sha256_of(path: Path, chunk_size: int = 8 * 1024 * 1024, budget: Optional[ScanBudget] = None) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
         file_size = path.stat().st_size
@@ -365,9 +363,7 @@ def verify_upstream(
                 remote_by_name.setdefault(Path(remote_path).name, []).append(entry)
 
     if local_files is not None:
-        local_weights = sorted(
-            p for p in local_files if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file()
-        )
+        local_weights = sorted(p for p in local_files if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file())
         if snapshot_root is not None:
             local_weights = [p for p in local_weights if p == snapshot_root or snapshot_root in p.parents]
     elif path.is_file():
@@ -508,16 +504,13 @@ def verify_upstream(
             size_verified += 1
 
     if (size_verified or hash_verified) and not any(
-        f.severity in (Severity.CRITICAL, Severity.HIGH)
-        and f.layer == "Layer 5 (Upstream Verification)"
+        f.severity in (Severity.CRITICAL, Severity.HIGH) and f.layer == "Layer 5 (Upstream Verification)"
         for f in report.findings
     ):
         report.add(
             layer="Layer 5 (Upstream Verification)",
             severity=Severity.PASS,
-            title=(
-                f"Upstream Integrity Verified ({hash_verified} SHA256, {size_verified} size-only)"
-            ),
+            title=(f"Upstream Integrity Verified ({hash_verified} SHA256, {size_verified} size-only)"),
             description=(
                 f"Matched {hash_verified + size_verified} local weight file(s) against the "
                 f"'{repo_id}' file tree on Hugging Face. Files without upstream LFS hashes are size-only."

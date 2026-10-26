@@ -69,13 +69,9 @@ class _BinaryReader:
         start = self.f.tell()
         end = start + n
         if n < 0 or end > self.file_size:
-            raise GGUFParseError(
-                f"Header read/seek [{start}, {end}) exceeds file bounds ({self.file_size} bytes)"
-            )
+            raise GGUFParseError(f"Header read/seek [{start}, {end}) exceeds file bounds ({self.file_size} bytes)")
         if end > MAX_HEADER_BYTES:
-            raise GGUFParseError(
-                f"GGUF header exceeds the {MAX_HEADER_BYTES:,}-byte safety limit"
-            )
+            raise GGUFParseError(f"GGUF header exceeds the {MAX_HEADER_BYTES:,}-byte safety limit")
 
     def seek_forward(self, n: int) -> None:
         self._check_range(n)
@@ -186,9 +182,7 @@ class _BinaryReader:
             raise GGUFParseError(f"Unknown GGUF metadata value type ID: {vtype}")
 
 
-def verify_gguf_file(
-    path: Path, report: ScanReport, budget: Optional[ScanBudget] = None
-) -> dict[str, Any]:
+def verify_gguf_file(path: Path, report: ScanReport, budget: Optional[ScanBudget] = None) -> dict[str, Any]:
     """
     Parses a GGUF file header and verifies all tensor dimensions and offsets
     against the actual physical file size on disk.

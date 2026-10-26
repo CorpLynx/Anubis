@@ -12,14 +12,21 @@ from typing import Iterator
 from anubis.models import ScanReport, Severity
 
 DEFAULT_SKIP_DIRS = {
-    ".git", ".venv", "venv", "node_modules", "__pycache__", ".cache", ".pytest_cache",
-    ".ruff_cache", ".eggs", "build", "dist",
+    ".git",
+    ".venv",
+    "venv",
+    "node_modules",
+    "__pycache__",
+    ".cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".eggs",
+    "build",
+    "dist",
 }
 DEFAULT_MAX_BYTES = 2 * 1024**3
 DEFAULT_DEEP_MAX_BYTES = 16 * 1024**3
-_BYTE_SIZE_RE = re.compile(
-    r"^\s*(\d+)\s*(b|k|kb|kib|m|mb|mib|g|gb|gib|t|tb|tib)?\s*$", re.IGNORECASE
-)
+_BYTE_SIZE_RE = re.compile(r"^\s*(\d+)\s*(b|k|kb|kib|m|mb|mib|g|gb|gib|t|tb|tib)?\s*$", re.IGNORECASE)
 
 
 def parse_byte_size(value: str | None, *, deep: bool = False) -> int:
@@ -32,8 +39,19 @@ def parse_byte_size(value: str | None, *, deep: bool = False) -> int:
     amount = int(match.group(1))
     suffix = (match.group(2) or "b").lower()
     power = {
-        "b": 0, "k": 1, "kb": 1, "kib": 1, "m": 2, "mb": 2, "mib": 2,
-        "g": 3, "gb": 3, "gib": 3, "t": 4, "tb": 4, "tib": 4,
+        "b": 0,
+        "k": 1,
+        "kb": 1,
+        "kib": 1,
+        "m": 2,
+        "mb": 2,
+        "mib": 2,
+        "g": 3,
+        "gb": 3,
+        "gib": 3,
+        "t": 4,
+        "tb": 4,
+        "tib": 4,
     }[suffix]
     if suffix in {"kb", "mb", "gb", "tb"}:
         multiplier = 1000**power
@@ -221,9 +239,8 @@ class ScanBudget:
                             if is_link:
                                 resolved_entry = Path(entry.path).resolve(strict=False)
                                 inside_scan_root = self._is_within(resolved_entry, resolved_root)
-                                inside_hf_blob_store = (
-                                    hf_blob_root is not None
-                                    and self._is_within(resolved_entry, hf_blob_root)
+                                inside_hf_blob_store = hf_blob_root is not None and self._is_within(
+                                    resolved_entry, hf_blob_root
                                 )
                                 if not inside_scan_root and not inside_hf_blob_store:
                                     self.skipped_symlinks += 1

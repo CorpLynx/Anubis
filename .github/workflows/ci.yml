@@ -4,9 +4,33 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly Ollama advisory snapshot check (Sundays 00:00 UTC)
+    - cron: '0 0 * * 0'
+
+permissions:
+  contents: read
 
 jobs:
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linters
+        # Pin black so a new release can't reformat code and fail CI unannounced
+        run: pip install ruff "black==26.10.1"
+      - name: Lint with Ruff
+        run: ruff check src tests scripts
+      - name: Format check with Black
+        run: black --check --diff src tests scripts
+
   test:
+    if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -39,8 +63,39 @@ jobs:
         run: python -m pytest -v
       - name: Run labeled threat corpus benchmark
         run: python scripts/benchmark_security_corpus.py
+      - name: CLI scan smoke test
+        run: python scripts/ci_scan_smoke.py
+
+  scan-sarif:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install .
+      - name: Scan example models and write SARIF
+        run: python scripts/ci_scan_smoke.py --sarif results.sarif
+      - name: Upload SARIF report
+        uses: actions/upload-artifact@v4
+        with:
+          name: anubis-example-scan-sarif
+          path: results.sarif
+
+  docker:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t anubis-scanner:ci .
+      - name: Run CLI in container
+        run: docker run --rm anubis-scanner:ci --help
 
   fuzz-smoke:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,3 +117,18 @@ jobs:
           python scripts/fuzz_anubis.py gguf -runs=500 -max_len=4096
           python scripts/fuzz_anubis.py safetensors -runs=500 -max_len=4096
           python scripts/fuzz_anubis.py jinja -runs=500 -max_len=4096
+
+  advisories:
+    # Network-dependent, so it runs on the weekly schedule or on demand, never on PRs.
+    # Fails when the bundled OSV snapshot is stale; run `make update-advisories` and review the diff.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install .
+      - name: Check Ollama advisory snapshot against OSV.dev
+        run: python scripts/update_ollama_advisories.py --check

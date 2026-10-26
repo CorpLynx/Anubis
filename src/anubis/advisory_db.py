@@ -36,14 +36,15 @@ def normalize_osv_response(
     snapshot_date: str | None = None,
 ) -> dict[str, Any]:
     """Normalize OSV records, retaining curated severity and requiring review on changes."""
-    old_by_id = {item["id"]: item for item in previous.get("advisories", []) if isinstance(item, dict) and item.get("id")}
+    old_by_id = {
+        item["id"]: item for item in previous.get("advisories", []) if isinstance(item, dict) and item.get("id")
+    }
     records: list[dict[str, Any]] = []
     for vuln in payload.get("vulns", []):
         if not isinstance(vuln, dict) or vuln.get("withdrawn"):
             continue
         package_matches = any(
-            isinstance(item, dict) and _matches_package(item.get("package"))
-            for item in vuln.get("affected", [])
+            isinstance(item, dict) and _matches_package(item.get("package")) for item in vuln.get("affected", [])
         )
         if not package_matches:
             continue
@@ -75,9 +76,7 @@ def normalize_osv_response(
         aliases = sorted({str(alias) for alias in vuln.get("aliases", []) if isinstance(alias, str)})
         summary = str(vuln.get("summary") or advisory_id)
         changed = bool(old) and (
-            old.get("summary") != summary
-            or old.get("aliases", []) != aliases
-            or old.get("ranges", []) != ranges
+            old.get("summary") != summary or old.get("aliases", []) != aliases or old.get("ranges", []) != ranges
         )
         is_new = not old
         records.append(
@@ -107,9 +106,7 @@ def normalize_osv_response(
     old_records = sorted(previous.get("advisories", []), key=lambda item: item.get("id", ""))
     snapshot_unchanged = records == old_records and previous.get("package") == OSV_PACKAGE
     selected_snapshot_date = (
-        previous.get("snapshot_date", "")
-        if snapshot_unchanged
-        else (snapshot_date or date.today().isoformat())
+        previous.get("snapshot_date", "") if snapshot_unchanged else (snapshot_date or date.today().isoformat())
     )
     return {
         "schema_version": 1,

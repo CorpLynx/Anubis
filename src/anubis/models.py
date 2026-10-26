@@ -1,7 +1,11 @@
 from dataclasses import dataclass, field
 from enum import Enum
+import hashlib
 import re
 from typing import Optional
+
+MAX_RECORDED_PROMPT_CHARS = 64_000
+MAX_RECORDED_PASSAGE_CHARS = 8_000
 
 
 class Severity(str, Enum):
@@ -84,6 +88,8 @@ class ScanReport:
     findings: list[Finding] = field(default_factory=list)
     complete: bool = True
     incomplete_reasons: list[str] = field(default_factory=list)
+    # Raw prompt text (templates, system prompts) kept for opt-in export to `anubis redteam --judge`.
+    prompt_texts: list[dict] = field(default_factory=list)
 
     def mark_incomplete(self, reason: str) -> None:
         self.complete = False
@@ -102,9 +108,7 @@ class ScanReport:
         confidence: Optional[float] = None,
         evidence: Optional[str] = None,
     ) -> None:
-        resolved_confidence = (
-            default_confidence(layer, severity, title) if confidence is None else confidence
-        )
+        resolved_confidence = default_confidence(layer, severity, title) if confidence is None else confidence
         if not 0.0 <= resolved_confidence <= 1.0:
             raise ValueError("Finding confidence must be between 0 and 1")
         self.findings.append(
@@ -119,6 +123,29 @@ class ScanReport:
                 confidence=resolved_confidence,
                 evidence=evidence or description,
             )
+        )
+
+    def record_prompt_text(self, source: str, subject: str, text: str, passages: Optional[list[str]] = None) -> None:
+        """Keep a bounded copy of prompt text for optional model judgment; never sent anywhere by the scan."""
+        digest = hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+        if any(entry["source"] == source and entry["sha256"] == digest for entry in self.prompt_texts):
+            return
+        kept_passages: list[str] = []
+        budget = MAX_RECORDED_PASSAGE_CHARS
+        for passage in passages or []:
+            if budget <= 0:
+                break
+            kept_passages.append(passage[:budget])
+            budget -= len(kept_passages[-1])
+        self.prompt_texts.append(
+            {
+                "source": source,
+                "subject": subject,
+                "sha256": digest,
+                "text": text[:MAX_RECORDED_PROMPT_CHARS],
+                "truncated": len(text) > MAX_RECORDED_PROMPT_CHARS,
+                "passages": kept_passages,
+            }
         )
 
     @property

@@ -67,8 +67,19 @@ OLLAMA_ADVISORIES: list[dict[str, Any]] = OLLAMA_ADVISORY_DATABASE["advisories"]
 OLLAMA_ADVISORY_SNAPSHOT: str = OLLAMA_ADVISORY_DATABASE["snapshot_date"]
 
 SECRET_FILE_NAMES = {
-    ".env", ".env.local", ".env.production", ".env.development", ".env.test", ".envrc",
-    ".npmrc", ".pypirc", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "credentials",
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".env.development",
+    ".env.test",
+    ".envrc",
+    ".npmrc",
+    ".pypirc",
+    "id_rsa",
+    "id_ed25519",
+    "id_ecdsa",
+    "id_dsa",
+    "credentials",
     "service-account.json",
 }
 
@@ -78,14 +89,20 @@ SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("Anthropic API Key", re.compile(r"sk-ant-[A-Za-z0-9_\-]{32,}")),
     ("GitHub PAT", re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,})")),
     ("AWS Access Key ID", re.compile(r"(?:AKIA|ASIA)[0-9A-Z]{16}")),
-    ("AWS Secret Access Key", re.compile(r"(?i)(?:aws_secret_access_key|aws_secret_key)\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}")),
+    (
+        "AWS Secret Access Key",
+        re.compile(r"(?i)(?:aws_secret_access_key|aws_secret_key)\s*[:=]\s*['\"]?[A-Za-z0-9/+=]{40}"),
+    ),
     ("Google API Key", re.compile(r"AIza[0-9A-Za-z_\-]{35}")),
     ("GCP Private Key Material", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")),
     ("Slack Token", re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}")),
     ("Stripe Secret Key", re.compile(r"(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}")),
     ("npm Token", re.compile(r"npm_[A-Za-z0-9]{36}")),
     ("PyPI Token", re.compile(r"pypi-[A-Za-z0-9_-]{50,}")),
-    ("Cloud Client Secret", re.compile(r"(?i)(?:azure_client_secret|client_secret)\s*[:=]\s*['\"]?[A-Za-z0-9~._\-]{20,}")),
+    (
+        "Cloud Client Secret",
+        re.compile(r"(?i)(?:azure_client_secret|client_secret)\s*[:=]\s*['\"]?[A-Za-z0-9~._\-]{20,}"),
+    ),
 ]
 
 
@@ -127,9 +144,7 @@ def _process_identity(pid: Optional[int]) -> tuple[Optional[str], Optional[str]]
         return None, None
 
 
-def _probe_endpoint(
-    path: str, port: int, timeout: float, host: str = "127.0.0.1"
-) -> tuple[Optional[int], str, bool]:
+def _probe_endpoint(path: str, port: int, timeout: float, host: str = "127.0.0.1") -> tuple[Optional[int], str, bool]:
     """GET one endpoint on the selected local host. Returns status, CORS origin, and JSON-body signal."""
     url_host = f"[{host.replace('%', '%25')}]" if ":" in host else host
     url = f"http://{url_host}:{port}{path}"
@@ -179,9 +194,7 @@ def probe_ai_service(
     return False, False, None
 
 
-def _make_listener(
-    ip: str, port: int, pid: Optional[int], process_hint: Optional[str] = None
-) -> Optional[Listener]:
+def _make_listener(ip: str, port: int, pid: Optional[int], process_hint: Optional[str] = None) -> Optional[Listener]:
     process_service, process_name = _process_identity(pid)
     if process_hint:
         process_service = process_service or _service_from_process_text(process_hint)
@@ -356,7 +369,8 @@ def audit_network_ports(
             exposed_ports_found += 1
             exposure_title = (
                 f"{service} Exposed on All Interfaces ({ip}:{port})"
-                if wildcard else f"{service} Bound to Non-Loopback Interface ({ip}:{port})"
+                if wildcard
+                else f"{service} Bound to Non-Loopback Interface ({ip}:{port})"
             )
             report.add(
                 layer="Layer 4 (Network Exposure)",
@@ -387,9 +401,7 @@ def audit_network_ports(
         probe_timeout = min(timeout, budget.remaining_seconds) if budget else timeout
         if probe_timeout <= 0:
             continue
-        unauth, cors_wildcard, path = probe_ai_service(
-            port, timeout=probe_timeout, host=probe_host, service=service
-        )
+        unauth, cors_wildcard, path = probe_ai_service(port, timeout=probe_timeout, host=probe_host, service=service)
         if not unauth:
             continue
         if not loopback:
@@ -399,12 +411,13 @@ def audit_network_ports(
                 title=f"Unauthenticated {service} API Reachable on Public Interface",
                 description=(
                     f"GET {path} on port {port} returned HTTP 200 with a JSON body and no authentication. "
-                    + ("The server also echoes wildcard CORS headers, so any visited website could drive it. "
-                       if cors_wildcard else
-                       "Any device on the network can query, load, or generate through this server. ")
+                    + (
+                        "The server also echoes wildcard CORS headers, so any visited website could drive it. "
+                        if cors_wildcard
+                        else "Any device on the network can query, load, or generate through this server. "
+                    )
                     + "This enables remote model theft, prompt injection against your agents, and RCE via "
-                    "vulnerable runner parsers."
-                    + process_evidence
+                    "vulnerable runner parsers." + process_evidence
                 ),
                 remediation=(
                     "Restrict binding to 127.0.0.1 and/or require an API key "
@@ -432,8 +445,7 @@ def audit_network_ports(
                 title=f"{service} API Open on Loopback ({ip}:{port})",
                 description=(
                     f"GET {path} returned 200 without authentication. Normal for single-user local setups, "
-                    "but any process running as your user can drive the model."
-                    + process_evidence
+                    "but any process running as your user can drive the model." + process_evidence
                 ),
                 location=f"{ip}:{port}",
             )
@@ -584,8 +596,8 @@ def audit_runner_versions(report: ScanReport, budget: Optional[ScanBudget] = Non
                 ),
                 remediation=(
                     "Review the affected range and curate a severity before treating this as actionable."
-                    if needs_review else
-                    "Upgrade to a release outside the affected range; consult the linked advisory."
+                    if needs_review
+                    else "Upgrade to a release outside the affected range; consult the linked advisory."
                 ),
                 location=f"https://osv.dev/vulnerability/{ghsa}",
             )
@@ -665,10 +677,30 @@ def audit_workspace_secrets(
                 )
                 secrets_found += 1
 
-            if fpath.suffix.lower() in {
-                ".py", ".json", ".yaml", ".yml", ".sh", ".env", ".txt", ".toml", ".js", ".ts",
-                ".pem", ".key", ".ini", ".conf", ".cfg", ".properties", ".md",
-            } or fname.startswith(".env") or fname in SECRET_FILE_NAMES:
+            if (
+                fpath.suffix.lower()
+                in {
+                    ".py",
+                    ".json",
+                    ".yaml",
+                    ".yml",
+                    ".sh",
+                    ".env",
+                    ".txt",
+                    ".toml",
+                    ".js",
+                    ".ts",
+                    ".pem",
+                    ".key",
+                    ".ini",
+                    ".conf",
+                    ".cfg",
+                    ".properties",
+                    ".md",
+                }
+                or fname.startswith(".env")
+                or fname in SECRET_FILE_NAMES
+            ):
                 size = fpath.stat().st_size
                 if size > 2 * 1024 * 1024:
                     budget.note("workspace single-file read limit")

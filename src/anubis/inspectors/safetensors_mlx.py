@@ -11,7 +11,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
-from anubis.limits import DEFAULT_SKIP_DIRS, ScanBudget, ScanLimitExceeded
+from anubis.limits import ScanBudget, ScanLimitExceeded
 from anubis.models import ScanReport, Severity
 
 MAX_HEADER_SIZE = 100 * 1024 * 1024  # 100 MB safety ceiling
@@ -36,13 +36,38 @@ SAFETENSORS_DTYPE_BYTES: dict[str, int] = {
 }
 
 DANGEROUS_PY_IMPORTS = {
-    "subprocess", "pty", "socket", "shutil", "ctypes", "pickle", "marshal",
-    "os", "urllib", "requests", "http", "ftplib", "importlib",
+    "subprocess",
+    "pty",
+    "socket",
+    "shutil",
+    "ctypes",
+    "pickle",
+    "marshal",
+    "os",
+    "urllib",
+    "requests",
+    "http",
+    "ftplib",
+    "importlib",
 }
 DANGEROUS_PY_CALLS = {
-    "eval", "exec", "compile", "__import__", "system", "popen", "run", "Popen",
-    "call", "check_call", "check_output", "urlopen", "urlretrieve", "create_connection",
-    "import_module", "CDLL", "PyDLL",
+    "eval",
+    "exec",
+    "compile",
+    "__import__",
+    "system",
+    "popen",
+    "run",
+    "Popen",
+    "call",
+    "check_call",
+    "check_output",
+    "urlopen",
+    "urlretrieve",
+    "create_connection",
+    "import_module",
+    "CDLL",
+    "PyDLL",
 }
 RISKY_MODULE_CALLS = {
     "os": DANGEROUS_PY_CALLS | {"remove", "unlink", "rmdir"},
@@ -56,9 +81,7 @@ RISKY_MODULE_CALLS = {
 }
 
 
-def verify_safetensors_file(
-    path: Path, report: ScanReport, budget: ScanBudget | None = None
-) -> dict[str, Any]:
+def verify_safetensors_file(path: Path, report: ScanReport, budget: ScanBudget | None = None) -> dict[str, Any]:
     """Verifies the 8-byte header size and tensor data_offsets of a .safetensors file."""
     try:
         file_size = path.stat().st_size
@@ -209,8 +232,7 @@ def verify_safetensors_file(
                 severity=Severity.CRITICAL,
                 title="Safetensors Out-of-Bounds Memory Offset",
                 description=(
-                    f"Tensor '{key}' data_offsets [{begin}, {end}] exceed physical file size "
-                    f"({file_size:,} bytes)."
+                    f"Tensor '{key}' data_offsets [{begin}, {end}] exceed physical file size " f"({file_size:,} bytes)."
                 ),
                 location=str(path),
             )
@@ -285,9 +307,7 @@ def verify_safetensors_file(
     return header
 
 
-def audit_python_file_ast(
-    py_path: Path, report: ScanReport, budget: ScanBudget | None = None
-) -> None:
+def audit_python_file_ast(py_path: Path, report: ScanReport, budget: ScanBudget | None = None) -> None:
     """Scans custom Python files inside a model directory for suspicious code execution."""
     try:
         size = py_path.stat().st_size
@@ -639,7 +659,8 @@ def inspect_model_directory(
                 chat_templates.append(template)
             elif isinstance(template, list):
                 chat_templates.extend(
-                    entry["template"] for entry in template
+                    entry["template"]
+                    for entry in template
                     if isinstance(entry, dict) and isinstance(entry.get("template"), str)
                 )
         except ScanLimitExceeded as exc:
