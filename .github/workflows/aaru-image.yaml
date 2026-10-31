@@ -1,0 +1,98 @@
+# Builds the Anubis image that CorpLynx/aaru runs to scan models before they are
+# served. Triggered by an aaru-* tag, which aaru's infra/scripts/build-anubis-image.sh
+# pushes for the pinned commit. Scans with Trivy before pushing; only a passing
+# image reaches the registry.
+name: Aaru image
+
+on:
+  push:
+    tags:
+      - aaru-*
+
+concurrency:
+  group: aaru-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  # Trivy 0.65.0, pinned by digest. Trivy's own release images and Actions were
+  # compromised in March 2026 (0.69.4 to 0.69.6); never use a floating tag.
+  TRIVY_IMAGE: aquasec/trivy:0.65.0@sha256:a22415a38938a56c379387a8163fcb0ce38b10ace73e593475d3658d578b2436
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Prepare environment
+        run: |
+          echo "FULL_IMAGE_NAME=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "${GITHUB_ENV}"
+          echo "LOCAL_IMAGE=anubis:${GITHUB_SHA}" >> "${GITHUB_ENV}"
+
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: ${{ env.LOCAL_IMAGE }}
+
+      # Block critical or high vulnerabilities that have a fix.
+      # Accepted exceptions go in .trivyignore with a reason.
+      - name: Scan image with Trivy
+        run: |
+          touch .trivyignore
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${PWD}/.trivyignore:/.trivyignore:ro" \
+            "${TRIVY_IMAGE}" image \
+            --scanners vuln \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --ignorefile /.trivyignore \
+            --exit-code 1 \
+            --no-progress \
+            "${LOCAL_IMAGE}"
+
+      - name: Smoke test
+        run: docker run --rm --network none "${LOCAL_IMAGE}" --help >/dev/null
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          for tag in "${GITHUB_REF_NAME}" "git-${GITHUB_SHA::7}"; do
+            docker tag "${LOCAL_IMAGE}" "${FULL_IMAGE_NAME}:${tag}"
+            docker push "${FULL_IMAGE_NAME}:${tag}"
+          done
+          ref=$(docker inspect --format '{{index .RepoDigests 0}}' "${FULL_IMAGE_NAME}:${GITHUB_REF_NAME}")
+          mkdir -p "${RUNNER_TEMP}/aaru-image"
+          echo "${ref}" > "${RUNNER_TEMP}/aaru-image/image-ref.txt"
+          {
+            echo "### Anubis image"
+            echo
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Tags: \`${GITHUB_REF_NAME}\`, \`git-${GITHUB_SHA::7}\`"
+            echo "- Pinned reference: \`${ref}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload image reference
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aaru-image
+          path: ${{ runner.temp }}/aaru-image/image-ref.txt
+          retention-days: 90

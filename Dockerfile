@@ -4,7 +4,8 @@
 #   docker build -t anubis-scanner:latest .
 #   docker run --rm -v "$PWD":/scan:ro anubis-scanner:latest scan /scan/model.gguf
 
-FROM python:3.12-slim-bookworm
+# Pinned by digest so a re-pointed tag cannot change the image (python 3.12-slim-bookworm, 2026-10-21).
+FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
 
 # Optional extras, e.g. --build-arg EXTRAS=judge for `anubis redteam --provider anthropic`
 ARG EXTRAS=""
