@@ -4,8 +4,14 @@
 #   docker build -t anubis-scanner:latest .
 #   docker run --rm -v "$PWD":/scan:ro anubis-scanner:latest scan /scan/model.gguf
 
-# Pinned by digest so a re-pointed tag cannot change the image (python 3.12-slim-bookworm, 2026-10-21).
-FROM python:3.12-slim-bookworm@sha256:6a0e06f5ba0b373d051aabd3fffb9b873f27f9a2a3a14bcbe37dee6f0e3bbc70
+# Pinned by digest so a re-pointed tag cannot change the image (python 3.12-slim-bookworm, 2026-10-28).
+FROM python:3.12-slim-bookworm@sha256:e697c81897302a4c4333bade000d98038fbb21eb064f8ee1fd42d02ebcd9d337
+
+# Debian security fixes published after the base image (the image build's Trivy
+# gate fails on fixable CRITICAL/HIGH findings, e.g. OpenSSL CVE-2026-84782).
+RUN apt-get update \
+    && apt-get -y upgrade --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 # Optional extras, e.g. --build-arg EXTRAS=judge for `anubis redteam --provider anthropic`
 ARG EXTRAS=""
