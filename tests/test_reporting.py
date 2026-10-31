@@ -1,6 +1,7 @@
 """Tests for stable finding metadata and JSON/SARIF rendering."""
 
 import json
+import re
 from io import StringIO
 
 from rich.console import Console
@@ -108,7 +109,10 @@ def test_fail_on_thresholds_and_strict_alias() -> None:
 def test_require_complete_cli_option_is_exposed() -> None:
     from typer.testing import CliRunner
 
-    result = CliRunner().invoke(cli.app, ["scan", "--help"])
+    # Rich may colour the help even under the test runner (CI sets FORCE_COLOR),
+    # which splits "--require-complete" into separately styled "-" segments.
+    result = CliRunner(env={"NO_COLOR": "1", "COLUMNS": "200"}).invoke(cli.app, ["scan", "--help"])
     assert result.exit_code == 0
-    assert "--require-complete" in result.stdout
-    assert "--max-bytes" in result.stdout
+    help_text = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout)
+    assert "--require-complete" in help_text
+    assert "--max-bytes" in help_text
