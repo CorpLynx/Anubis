@@ -470,7 +470,7 @@ def test_workspace_secret_scanner(tmp_path: Path) -> None:
     (tmp_path / "deploy.sh").write_text(f"export AWS_ACCESS_KEY_ID={aws_key}\n")
     keys_dir = tmp_path / ".ssh"
     keys_dir.mkdir()
-    (keys_dir / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+    (keys_dir / "id_ed25519").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")  # gitleaks:allow (header only)
 
     report = ScanReport(target=str(tmp_path))
     from anubis.inspectors.env_audit import audit_workspace_secrets
