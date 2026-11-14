@@ -104,12 +104,11 @@ docker compose run --rm anubis
 | `scan-sarif` | Scans clean and malicious example models, uploads the SARIF report as an artifact | Push to `main`, pull requests |
 | `docker` | Builds the image and runs the CLI in it | Push to `main`, pull requests |
 | `fuzz-smoke` | Short coverage-guided fuzzing of the GGUF, Safetensors, and Jinja parsers | Push to `main`, pull requests |
-| `advisories` | Fails when the bundled Ollama OSV advisory snapshot is stale | Weekly (Sunday 00:00 UTC), manual |
 
 ### Workflow Features
 
 - **Automatic on push/PR**: lint, test, scan, Docker, and fuzz jobs run in parallel
-- **Weekly schedule**: checks the Ollama advisory snapshot against OSV.dev; refresh it with `make update-advisories`
+- **Weekly advisory refresh**: `.github/workflows/update-ollama-advisories.yml` opens a reviewable PR when the Ollama OSV snapshot changes
 - **SARIF output**: the example scan's SARIF report is uploaded as the `anubis-example-scan-sarif` artifact
 
 ### Scanning Your Own Models in CI
